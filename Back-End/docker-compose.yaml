@@ -28,6 +28,26 @@ services:
     volumes:
       - redisinsight-data:/data  # Persist RedisInsight data in a Docker volume
     restart: unless-stopped
+
+  talehaven-postgres:
+    image: postgres:16-alpine
+    container_name: talehaven-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_USER=talehaven
+      - POSTGRES_PASSWORD=talehaven123
+      - POSTGRES_DB=talehaven
+    volumes:
+      - talehaven-postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U talehaven"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   redis-data:
   redisinsight-data:
+  talehaven-postgres-data:

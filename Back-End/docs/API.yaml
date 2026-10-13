@@ -1,0 +1,1258 @@
+openapi: 3.0.3
+info:
+  title: TaleHaven Backend API
+  version: 3.1.0
+  description: |
+    Complete API documentation for TaleHaven backend services.
+    
+    **v3.1.0 - Language Filtering Enhancement:**
+    - `/manga/popular` and `/manga/search` now filter by available language
+    - New `availableLanguage[]` parameter (defaults to English)
+    - Prevents empty chapter lists from non-English scanlations
+    - Ensures manga results have readable chapters in your language
+    
+    **v3.0.0 - Reading Progress Architecture Update:**
+    - Redis (hot cache) + PostgreSQL (persistent storage)
+    - New `/reading-progress/sync` endpoint for database persistence
+    - Field renamed: `lastPage` → `currentPage`
+    - Reading progress never expires (stored in PostgreSQL)
+    - Supports multi-device sync
+    
+    **v2.0.0 - Authentication Update:**
+    - JWT authentication with HTTP-only cookies
+    - JWT tokens stored in `talehaven_auth_token` cookie
+    - Tokens valid for 30 days
+    - Include credentials in all requests: `fetch(url, { credentials: 'include' })`
+    
+    **Cover Image URLs:**
+    - All manga endpoints return direct MangaDex CDN URLs
+    - Format: `https://uploads.mangadex.org/covers/{mangaId}/{fileName}.{quality}.jpg`
+    - Example: `abc123.jpg` at 512px → `abc123.jpg.512.jpg`
+    - No proxy needed - use URLs directly in `<img src>` tags
+    - Quality options: `256`, `512` (default)
+
+servers:
+  - url: http://localhost:3001
+
+security:
+  - JWTCookie: []
+
+components:
+  securitySchemes:
+    JWTCookie:
+      type: apiKey
+      in: cookie
+      name: talehaven_auth_token
+      description: |
+        JWT token authentication via HTTP-only cookie.
+        - Automatically set on login/register
+        - Valid for 30 days
+        - Include credentials in requests: `fetch(url, { credentials: 'include' })`
+        - Token format: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+paths:
+  /test:
+    get:
+      summary: Health/test route
+      security: []
+      responses:
+        '200':
+          description: Test payload
+          content:
+            application/json:
+              example:
+                test: Hello There
+
+  # ==========================================
+  # Authentication Endpoints
+  # ==========================================
+
+  /auth/register:
+    post:
+      summary: Register a new user account
+      description: |
+        Creates a new user account and returns a JWT token in an HTTP-only cookie.
+        The JWT token is automatically set and valid for 30 days.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+            example:
+              email: user@example.com
+              password: SecurePassword123!
+      responses:
+        '201':
+          description: User created successfully, JWT token set in cookie
+          headers:
+            Set-Cookie:
+              description: JWT authentication token (HTTP-only, 30 days)
+              schema:
+                type: string
+                example: talehaven_auth_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...; Path=/; HttpOnly; Max-Age=2592000
+          content:
+            application/json:
+              example:
+                message: Account created successfully
+                user:
+                  id: 1
+                  email: user@example.com
+                  created_at: '2026-05-10T12:00:00Z'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              example:
+                error: Invalid request
+                message: "Key: 'RegisterRequest.Password' Error:Field validation for 'Password' failed on the 'min' tag"
+        '409':
+          description: Email already exists
+          content:
+            application/json:
+              example:
+                error: Email already exists
+                message: An account with this email already exists
+
+  /auth/login:
+    post:
+      summary: Login with email and password
+      description: |
+        Authenticates user and returns a JWT token in an HTTP-only cookie.
+        The JWT token is automatically set and valid for 30 days.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+            example:
+              email: user@example.com
+              password: SecurePassword123!
+      responses:
+        '200':
+          description: Login successful, JWT token set in cookie
+          headers:
+            Set-Cookie:
+              description: JWT authentication token (HTTP-only, 30 days)
+              schema:
+                type: string
+                example: talehaven_auth_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...; Path=/; HttpOnly; Max-Age=2592000
+          content:
+            application/json:
+              example:
+                message: Login successful
+                user:
+                  id: 1
+                  email: user@example.com
+                  created_at: '2026-05-10T12:00:00Z'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              example:
+                error: Invalid request
+                message: "Key: 'LoginRequest.Email' Error:Field validation for 'Email' failed on the 'email' tag"
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              example:
+                error: Invalid credentials
+                message: Invalid email or password
+
+  /auth/logout:
+    post:
+      summary: Logout current user
+      description: Clears the JWT authentication cookie
+      security: []
+      responses:
+        '200':
+          description: Logout successful, JWT cookie cleared
+          headers:
+            Set-Cookie:
+              description: JWT cookie cleared
+              schema:
+                type: string
+                example: talehaven_auth_token=; Path=/; HttpOnly; Max-Age=-1
+          content:
+            application/json:
+              example:
+                message: Logged out successfully
+
+  /auth/me:
+    get:
+      summary: Get current authenticated user information
+      description: Requires valid JWT token in cookie. User info is decoded from the JWT token.
+      responses:
+        '200':
+          description: User information retrieved
+          content:
+            application/json:
+              example:
+                user:
+                  id: 1
+                  email: user@example.com
+                  created_at: '2026-05-10T12:00:00Z'
+        '401':
+          description: Not authenticated or token expired/invalid
+          content:
+            application/json:
+              examples:
+                noToken:
+                  summary: No JWT token found
+                  value:
+                    error: Authentication required
+                    message: You must be logged in to access this resource
+                expiredToken:
+                  summary: Token expired
+                  value:
+                    error: Token expired
+                    message: Your session has expired. Please log in again
+                invalidToken:
+                  summary: Invalid token
+                  value:
+                    error: Invalid token
+                    message: Your session is invalid. Please log in again
+
+  /auth/password:
+    put:
+      summary: Change password for authenticated user
+      description: Requires valid JWT token. User is identified from the JWT token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - old_password
+                - new_password
+              properties:
+                old_password:
+                  type: string
+                new_password:
+                  type: string
+                  minLength: 8
+            example:
+              old_password: OldPassword123!
+              new_password: NewSecurePassword456!
+      responses:
+        '200':
+          description: Password changed successfully
+          content:
+            application/json:
+              example:
+                message: Password changed successfully
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              example:
+                error: Invalid request
+                message: "Key: 'ChangePasswordRequest.NewPassword' Error:Field validation for 'NewPassword' failed on the 'min' tag"
+        '401':
+          description: Not authenticated or incorrect old password
+          content:
+            application/json:
+              example:
+                error: Invalid password
+                message: Current password is incorrect
+
+  /auth/account:
+    delete:
+      summary: Delete current user account
+      description: Requires valid JWT token. Permanently deletes the authenticated user's account.
+      responses:
+        '200':
+          description: Account deleted successfully
+          content:
+            application/json:
+              example:
+                message: Account deleted successfully
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              example:
+                error: Authentication required
+                message: You must be logged in to delete your account
+
+  # ==========================================
+  # Google Books API (Disabled)
+  # ==========================================
+
+  /search/books:
+    get:
+      summary: Search Google Books
+      security: []
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+          example: dune
+      responses:
+        '200':
+          description: Books list
+          content:
+            application/json:
+              example:
+                booksList: []
+        '400':
+          description: Missing query
+          content:
+            application/json:
+              example:
+                message: Empty query param
+
+  /search/book/{bookId}:
+    get:
+      summary: Get one Google Book
+      security: []
+      parameters:
+        - name: bookId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Book payload
+          content:
+            application/json:
+              example:
+                booksList: {}
+
+  /manga/search:
+    get:
+      summary: Search manga
+      description: |
+        Search for manga by title with optional tag filtering.
+        
+        **Language Filtering (NEW):**
+        - Filter by available translated language (defaults to English)
+        - Only returns manga that have chapters in the specified language(s)
+        - Prevents storing manga IDs with no readable chapters
+        
+        **Cover URLs:**
+        - Automatically included for all results (512px quality)
+        - Format: `https://uploads.mangadex.org/covers/{mangaId}/{fileName}.512.jpg`
+        - Direct MangaDex CDN links
+      security: []
+      parameters:
+        - name: title
+          in: query
+          required: true
+          schema:
+            type: string
+          example: naruto
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+          example: 10
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+          example: 0
+        - name: availableLanguage[]
+          in: query
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [en, ja, es, fr, de, it, pt-br, ru, zh, ko]
+            default: [en]
+          style: form
+          explode: true
+          description: Filter manga by available translated languages (defaults to English)
+        - name: includedTags[]
+          in: query
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: excludedTags[]
+          in: query
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              example:
+                result: ok
+                data: []
+                total: 0
+                limit: 10
+                offset: 0
+
+  /manga/popular:
+    get:
+      summary: Get popular manga
+      description: |
+        Returns popular manga ordered by follower count (most followed) or rating.
+        Each manga includes full cover image URLs ready for display.
+        
+        **Language Filtering (NEW):**
+        - Filter by available translated language (defaults to English)
+        - Only returns manga that have chapters in the specified language(s)
+        - Prevents empty chapter lists from non-English scanlations
+        
+        **Features:**
+        - Automatic cover URL generation (512px quality)
+        - Cache enabled (15 minute TTL)
+        - Filter by tags and language
+        - Order by followedCount (default) or rating
+        
+        **Cover URLs:**
+        - Format: `https://uploads.mangadex.org/covers/{mangaId}/{fileName}.512.jpg`
+        - Example: `abc123.jpg` becomes `abc123.jpg.512.jpg` (512px quality)
+        - Direct MangaDex CDN links - no proxy needed
+        - Ready to use in `<img>` tags
+        
+        **Use case:** Display trending/popular manga on homepage or discovery page.
+      security: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          description: Number of results to return
+          example: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+          description: Offset for pagination
+          example: 0
+        - name: orderBy
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [followedCount, rating]
+            default: followedCount
+          description: Sort order - followedCount (most popular) or rating (highest rated)
+          example: followedCount
+        - name: availableLanguage[]
+          in: query
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [en, ja, es, fr, de, it, pt-br, ru, zh, ko]
+            default: [en]
+          style: form
+          explode: true
+          description: Filter manga by available translated languages (defaults to English)
+        - name: includedTags[]
+          in: query
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+              format: uuid
+          style: form
+          explode: true
+          description: Filter by tags (UUID array)
+        - name: excludedTags[]
+          in: query
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+              format: uuid
+          style: form
+          explode: true
+          description: Exclude tags (UUID array)
+      responses:
+        '200':
+          description: Popular manga list with cover URLs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: ok
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        title:
+                          type: string
+                        description:
+                          type: string
+                        coverUrl:
+                          type: string
+                          format: uri
+                          description: Full MangaDex cover URL (512px quality)
+                        authors:
+                          type: array
+                          items:
+                            type: string
+                        artists:
+                          type: array
+                          items:
+                            type: string
+                        status:
+                          type: string
+                        year:
+                          type: integer
+                        tags:
+                          type: array
+                          items:
+                            type: string
+                  total:
+                    type: integer
+                    description: Total results available
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+              example:
+                result: ok
+                data:
+                  - id: a77742b1-befd-49a4-bff5-1ad4e6b0ef7b
+                    title: One Piece
+                    description: Monkey D. Luffy refuses to let anyone or anything stand in the way of his quest to become king of all pirates...
+                    coverUrl: https://uploads.mangadex.org/covers/a77742b1-befd-49a4-bff5-1ad4e6b0ef7b/8b3cf999-563e-4a1f-9445-6c8e43525321.jpg.512.jpg
+                    authors: ["Eiichiro Oda"]
+                    artists: ["Eiichiro Oda"]
+                    status: ongoing
+                    year: 1997
+                    tags: ["Action", "Adventure", "Comedy", "Fantasy"]
+                  - id: 8d5d7c3b-eb95-4e58-838f-4da6c2cbee1f
+                    title: Naruto
+                    description: Naruto is a young shinobi with an incorrigible knack for mischief...
+                    coverUrl: https://uploads.mangadex.org/covers/8d5d7c3b-eb95-4e58-838f-4da6c2cbee1f/4c3f9e00-731a-4be9-8c94-c9a5c2c6f1e2.png.512.jpg
+                    authors: ["Masashi Kishimoto"]
+                    artists: ["Masashi Kishimoto"]
+                    status: completed
+                    year: 1999
+                    tags: ["Action", "Adventure", "Shounen"]
+                total: 250
+                limit: 20
+                offset: 0
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              example:
+                error: Failed to retrieve popular manga
+                message: MangaDex API error details
+
+  /manga/{mangaId}:
+    get:
+      summary: Get manga by ID
+      description: |
+        Retrieve detailed information for a specific manga.
+        
+        **Cover URLs:**
+        - Automatically included (512px quality)
+        - Format: `https://uploads.mangadex.org/covers/{mangaId}/{fileName}.512.jpg`
+        - Example: If fileName is `abc123.jpg`, URL will be `abc123.jpg.512.jpg`
+      security: []
+      parameters:
+        - name: mangaId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Manga details
+          content:
+            application/json:
+              example:
+                result: ok
+                data: {}
+
+  /manga/{mangaId}/chapters:
+    get:
+      summary: Get manga chapters
+      description: |
+        Retrieve chapters for a specific manga.
+        
+        **Language Filtering:**
+        - Filters by translated language (defaults to English)
+        - Use `translatedLanguage[]` parameter to specify languages
+        - Multiple languages can be requested
+      security: []
+      parameters:
+        - name: mangaId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 100
+          example: 100
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+          example: 0
+        - name: translatedLanguage[]
+          in: query
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [en, ja, es, fr, de, it, pt-br, ru, zh, ko]
+            default: [en]
+          style: form
+          explode: true
+          description: Filter by translated language (defaults to English)
+      responses:
+        '200':
+          description: Chapters list
+          content:
+            application/json:
+              example:
+                result: ok
+                data: []
+                total: 0
+                limit: 100
+                offset: 0
+
+  /manga/{mangaId}/cover:
+    get:
+      summary: Get manga cover URL
+      description: |
+        Returns the MangaDex CDN URL for a manga's cover image.
+        
+        **URL Format:**
+        - `https://uploads.mangadex.org/covers/{mangaId}/{fileName}.{quality}.jpg`
+        - The `fileName` includes its original extension (e.g., `.jpg` or `.png`)
+        - Quality suffix is appended: `abc123.jpg` → `abc123.jpg.512.jpg`
+        
+        **Quality Options:**
+        - `256` - 256px width
+        - `512` - 512px width (default, recommended)
+        - Original - Omit quality parameter for full-size image
+      security: []
+      parameters:
+        - name: mangaId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: quality
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [256, 512]
+          example: '512'
+      responses:
+        '200':
+          description: Cover URL
+          content:
+            application/json:
+              example:
+                result: ok
+                coverUrl: https://uploads.mangadex.org/covers/a77742b1-befd-49a4-bff5-1ad4e6b0ef7b/8b3cf999-563e-4a1f-9445-6c8e43525321.jpg.512.jpg
+
+  /manga/{mangaId}/download-cover:
+    post:
+      summary: Download and cache manga cover
+      security: []
+      parameters:
+        - name: mangaId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: quality
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [256, 512]
+          example: '512'
+      responses:
+        '200':
+          description: Cover download started/completed
+          content:
+            application/json:
+              example:
+                result: ok
+                message: Cover downloaded successfully
+                mangaId: a77742b1-befd-49a4-bff5-1ad4e6b0ef7b
+
+  /chapter/{chapterId}:
+    get:
+      summary: Get chapter by ID
+      security: []
+      parameters:
+        - name: chapterId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Chapter details
+          content:
+            application/json:
+              example:
+                result: ok
+                data: {}
+
+  /chapter/{chapterId}/pages:
+    get:
+      summary: Get/download local chapter pages (also triggers next-chapter prefetch)
+      security: []
+      parameters:
+        - name: chapterId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: quality
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [data, saver]
+          example: data
+      responses:
+        '200':
+          description: Local page paths
+          content:
+            application/json:
+              example:
+                result: ok
+                mangaId: a77742b1-befd-49a4-bff5-1ad4e6b0ef7b
+                chapterId: 73af4d8d-1532-4a72-b1b9-8f4e5cd295c9
+                pages:
+                  - /images/manga/{mangaId}/chapters/{chapterId}/1.jpg
+                  - /images/manga/{mangaId}/chapters/{chapterId}/2.jpg
+                pageCount: 2
+
+  /chapter/{chapterId}/pages/stream:
+    get:
+      summary: Stream pages progressively as they finish downloading (SSE)
+      security: []
+      parameters:
+        - name: chapterId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: quality
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [data, saver]
+          example: data
+      responses:
+        '200':
+          description: text/event-stream events (`start`, many `page`, optional `page_error`, `complete`)
+          content:
+            text/event-stream:
+              example: |
+                event:start
+                data:{"result":"ok","chapterId":"...","message":"Starting progressive download"}
+
+                event:page
+                data:{"chapterId":"...","mangaId":"...","pageNumber":1,"totalPages":53,"pageUrl":"/images/manga/.../1.jpg","downloaded":true}
+
+                event:complete
+                data:{"result":"ok","chapterId":"...","mangaId":"...","totalPages":53,"successCount":53}
+
+  /chapter/{chapterId}/download:
+    post:
+      summary: Start async chapter download
+      security: []
+      parameters:
+        - name: chapterId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: quality
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [data, saver]
+          example: data
+      responses:
+        '202':
+          description: Download job accepted
+          content:
+            application/json:
+              example:
+                result: ok
+                message: Chapter download started
+                chapterId: 73af4d8d-1532-4a72-b1b9-8f4e5cd295c9
+
+  /reading-progress:
+    post:
+      summary: Save or update chapter progress (Redis only - fast!)
+      description: |
+        Requires authentication (JWT token).
+        Writes progress to Redis cache only for instant response (~1-2ms).
+        
+        **Architecture:**
+        - Writes to Redis with 30-minute TTL
+        - Does NOT write to PostgreSQL (use /sync endpoint for that)
+        - Suitable for rapid page turns
+        
+        **When to use:**
+        - Every time user changes page (5 → 6 → 7...)
+        - High frequency updates
+        
+        **When to sync to DB:**
+        - Call `/reading-progress/sync` when user leaves chapter
+        - Or on tab close, chapter switch, etc.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - mangaId
+                - chapterId
+                - currentPage
+              properties:
+                mangaId:
+                  type: string
+                  format: uuid
+                chapterId:
+                  type: string
+                  format: uuid
+                currentPage:
+                  type: integer
+                  minimum: 1
+                  description: Current page number (renamed from lastPage)
+                totalPages:
+                  type: integer
+                  description: Total pages in chapter (optional)
+            example:
+              mangaId: a77742b1-befd-49a4-bff5-1ad4e6b0ef7b
+              chapterId: 73af4d8d-1532-4a72-b1b9-8f4e5cd295c9
+              currentPage: 15
+              totalPages: 53
+      responses:
+        '200':
+          description: Progress saved to Redis
+          content:
+            application/json:
+              example:
+                result: ok
+                message: Reading progress updated successfully
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              example:
+                error: Unauthorized
+                message: authentication required - please login
+
+    get:
+      summary: Get all progress for current user
+      description: |
+        Requires authentication. Returns all reading progress for the authenticated user.
+        
+        **Data source:** PostgreSQL (persistent storage)
+        
+        **Note:** This returns permanent progress data, not Redis cache.
+      responses:
+        '200':
+          description: All progress from PostgreSQL
+          content:
+            application/json:
+              example:
+                result: ok
+                data:
+                  userId: 123
+                  mangas:
+                    "a77742b1-befd-49a4-bff5-1ad4e6b0ef7b":
+                      mangaId: a77742b1-befd-49a4-bff5-1ad4e6b0ef7b
+                      chapters:
+                        "73af4d8d-1532-4a72-b1b9-8f4e5cd295c9":
+                          currentPage: 15
+                          totalPages: 53
+                          lastReadAt: '2026-05-10T15:30:00Z'
+                      updatedAt: '2026-05-10T15:30:00Z'
+                  updatedAt: '2026-05-10T15:30:00Z'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              example:
+                error: Unauthorized
+                message: no session identifier found - please login
+
+    delete:
+      summary: Delete all progress for current user
+      description: |
+        Requires authentication. Deletes ALL reading progress for the authenticated user.
+        
+        **Deletion scope:**
+        - Removes ALL chapters from Redis cache
+        - Removes ALL chapters from PostgreSQL database
+        - Progress cannot be recovered
+        
+        **Warning:** This action is irreversible!
+      responses:
+        '200':
+          description: All progress deleted from both Redis and PostgreSQL
+          content:
+            application/json:
+              example:
+                result: ok
+                message: All reading progress deleted successfully
+
+  /reading-progress/sync:
+    post:
+      summary: Sync reading progress to PostgreSQL (NEW!)
+      description: |
+        **IMPORTANT:** Syncs Redis cache data to PostgreSQL for permanent storage.
+        
+        **Architecture:**
+        1. Reads current progress from Redis
+        2. UPSERTs to PostgreSQL (permanent storage)
+        3. Progress now survives Redis expiry
+        
+        **When to call:**
+        - User leaves chapter (navigate away)
+        - User closes tab (beforeunload event)
+        - User opens different chapter
+        - Optional: Periodic background sync (every 60 seconds)
+        
+        **Performance:**
+        - Single DB write per chapter session
+        - Prevents PostgreSQL spam from rapid page turns
+        
+        **Multi-device sync:**
+        - PostgreSQL data accessible from any device
+        - Resume reading from where you left off
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - chapterId
+              properties:
+                chapterId:
+                  type: string
+                  format: uuid
+                  description: Chapter ID to sync
+            example:
+              chapterId: 73af4d8d-1532-4a72-b1b9-8f4e5cd295c9
+      responses:
+        '200':
+          description: Progress synced to PostgreSQL
+          content:
+            application/json:
+              example:
+                result: ok
+                message: Reading progress synced successfully
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              example:
+                error: Unauthorized
+                message: authentication required - please login
+
+    get:
+      summary: Get all progress for current user
+      description: |
+        Requires authentication. Returns all reading progress for the authenticated user.
+        
+        **Data source:** PostgreSQL (persistent storage)
+        
+        **Note:** This returns permanent progress data, not Redis cache.
+      responses:
+        '200':
+          description: All progress from PostgreSQL
+          content:
+            application/json:
+              example:
+                result: ok
+                data:
+                  userId: 123
+                  mangas:
+                    "a77742b1-befd-49a4-bff5-1ad4e6b0ef7b":
+                      mangaId: a77742b1-befd-49a4-bff5-1ad4e6b0ef7b
+                      chapters:
+                        "73af4d8d-1532-4a72-b1b9-8f4e5cd295c9":
+                          currentPage: 15
+                          totalPages: 53
+                          lastReadAt: '2026-05-10T15:30:00Z'
+                      updatedAt: '2026-05-10T15:30:00Z'
+                  updatedAt: '2026-05-10T15:30:00Z'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              example:
+                error: Unauthorized
+                message: no session identifier found - please login
+
+    delete:
+      summary: Delete all progress for current user
+      description: |
+        Requires authentication. Deletes ALL reading progress for the authenticated user.
+        
+        **Deletion scope:**
+        - Removes ALL chapters from Redis cache
+        - Removes ALL chapters from PostgreSQL database
+        - Progress cannot be recovered
+        
+        **Warning:** This action is irreversible!
+      responses:
+        '200':
+          description: All progress deleted from both Redis and PostgreSQL
+          content:
+            application/json:
+              example:
+                result: ok
+                message: All reading progress deleted successfully
+
+  /reading-progress/chapter/{chapterId}:
+    get:
+      summary: Get one chapter progress
+      description: |
+        Requires authentication. Returns progress for the specified chapter.
+        
+        **Data flow:**
+        1. Check Redis first (hot cache)
+        2. If not found, check PostgreSQL
+        3. If found in PostgreSQL, warm Redis cache
+        4. Return result
+        
+        **Use case:** Call when opening a chapter to resume from saved page.
+      parameters:
+        - name: chapterId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: mangaId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Progress found (from Redis or PostgreSQL)
+          content:
+            application/json:
+              example:
+                result: ok
+                data:
+                  userId: 123
+                  mangaId: a77742b1-befd-49a4-bff5-1ad4e6b0ef7b
+                  chapterId: 73af4d8d-1532-4a72-b1b9-8f4e5cd295c9
+                  currentPage: 15
+                  totalPages: 53
+                  lastReadAt: '2026-05-10T15:30:00Z'
+        '404':
+          description: No saved progress (user hasn't read this chapter)
+          content:
+            application/json:
+              example:
+                result: not_found
+                message: No progress found for this chapter
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              example:
+                error: Unauthorized
+                message: authentication required - please login
+
+    delete:
+      summary: Delete one chapter progress
+      description: |
+        Requires authentication. Deletes progress for the specified chapter.
+        
+        **Deletion scope:**
+        - Removes from Redis cache
+        - Removes from PostgreSQL database
+        - Progress cannot be recovered
+      parameters:
+        - name: chapterId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Deleted from both Redis and PostgreSQL
+          content:
+            application/json:
+              example:
+                result: ok
+                message: Reading progress deleted successfully
+
+  /reading-progress/manga/{mangaId}:
+    get:
+      summary: Get all chapter progress for one manga
+      description: |
+        Requires authentication. Returns all chapter progress for the specified manga.
+        
+        **Data source:** PostgreSQL (persistent storage)
+        
+        **Use case:** Display all chapters read for a manga, reading history.
+      parameters:
+        - name: mangaId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: All chapters progress for this manga
+          content:
+            application/json:
+              example:
+                result: ok
+                data:
+                  mangaId: a77742b1-befd-49a4-bff5-1ad4e6b0ef7b
+                  chapters:
+                    "73af4d8d-1532-4a72-b1b9-8f4e5cd295c9":
+                      currentPage: 15
+                      totalPages: 53
+                      lastReadAt: '2026-05-10T15:30:00Z'
+                    "a427cb06-e804-4eea-8723-3392f2922e8f":
+                      currentPage: 1
+                      totalPages: 45
+                      lastReadAt: '2026-05-09T14:20:00Z'
+                  updatedAt: '2026-05-10T15:30:00Z'
+
+    delete:
+      summary: Delete all progress for one manga
+      description: |
+        Requires authentication. Deletes all chapter progress for the specified manga.
+        
+        **Deletion scope:**
+        - Removes all chapters from Redis cache
+        - Removes all chapters from PostgreSQL database
+        - Progress cannot be recovered
+      parameters:
+        - name: mangaId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: All manga chapters deleted from both Redis and PostgreSQL
+          content:
+            application/json:
+              example:
+                result: ok
+                message: Manga progress deleted successfully
+
+  /reading-progress/manga-list:
+    get:
+      summary: Get list of read manga IDs
+      description: |
+        Requires authentication. Returns list of manga IDs that the user has read.
+        
+        **Data source:** PostgreSQL (DISTINCT manga_id query)
+        
+        **Use case:** Display "Continue Reading" list, reading library.
+      responses:
+        '200':
+          description: List of manga IDs with reading progress
+          content:
+            application/json:
+              example:
+                result: ok
+                data:
+                  - a77742b1-befd-49a4-bff5-1ad4e6b0ef7b
+                  - b88853c2-cfge-50b5-cgg6-2be5f7c1fg8c
+                  - c99964d3-dhgh-61c6-dhh7-3cf6g8d2gh9d
+                count: 3
+
+  /images/{path}:
+    get:
+      summary: Serve downloaded image files
+      security: []
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+          example: manga/{mangaId}/chapters/{chapterId}/1.jpg
+      responses:
+        '200':
+          description: Image binary stream
+

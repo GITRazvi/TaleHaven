@@ -5,6 +5,233 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+body.dark-mode {
+  background-color: #1a1a1a;
+  color: #e0e0e0 !important;
+}
+
+body.dark-mode * {
+  color: #e0e0e0;
+}
+
+body.dark-mode h1,
+body.dark-mode h2,
+body.dark-mode h3,
+body.dark-mode h4,
+body.dark-mode h5,
+body.dark-mode h6 {
+  color: #ffffff !important;
+}
+
+body.dark-mode p,
+body.dark-mode div,
+body.dark-mode span,
+body.dark-mode label {
+  color: #e0e0e0;
+}
+
+body.dark-mode .card {
+  background-color: #2a2a2a;
+  color: #e0e0e0;
+  border-color: #404040;
+}
+
+body.dark-mode .card-body {
+  color: #e0e0e0;
+}
+
+body.dark-mode .list-group-item {
+  background-color: #2a2a2a;
+  color: #e0e0e0 !important;
+  border-color: #404040;
+}
+
+body.dark-mode .list-group-item:hover {
+  background-color: #353535;
+  color: #ffffff !important;
+}
+
+body.dark-mode a {
+  color: #66b3ff;
+}
+
+body.dark-mode a:hover {
+  color: #99ccff;
+}
+
+body.dark-mode .btn-outline-secondary {
+  color: #e0e0e0;
+  border-color: #6c757d;
+}
+
+body.dark-mode .btn-outline-secondary:hover {
+  background-color: #6c757d;
+  color: #fff;
+}
+
+body.dark-mode .btn-outline-primary {
+  color: #66b3ff;
+  border-color: #66b3ff;
+}
+
+body.dark-mode .btn-outline-primary:hover {
+  background-color: #66b3ff;
+  color: #000;
+}
+
+body.dark-mode .btn-secondary {
+  background-color: #6c757d;
+  border-color: #6c757d;
+  color: #fff;
+}
+
+body.dark-mode .text-muted {
+  color: #999 !important;
+}
+
+body.dark-mode .text-danger {
+  color: #ff6b6b !important;
+}
+
+body.dark-mode input,
+body.dark-mode select,
+body.dark-mode textarea {
+  background-color: #2a2a2a;
+  color: #e0e0e0 !important;
+  border-color: #404040;
+}
+
+body.dark-mode input::placeholder {
+  color: #888;
+}
+
+body.dark-mode input:focus,
+body.dark-mode select:focus,
+body.dark-mode textarea:focus {
+  background-color: #2a2a2a;
+  color: #e0e0e0 !important;
+  border-color: #66b3ff;
+  box-shadow: 0 0 0 0.2rem rgba(102, 179, 255, 0.25);
+}
+
+body.dark-mode small {
+  color: #aaa;
+}
+
+body.dark-mode .badge {
+  border: 1px solid transparent;
+}
+
+body.dark-mode .bg-secondary {
+  background-color: #6c757d !important;
+  border-color: #6c757d !important;
+}
+
+body.dark-mode .bg-primary {
+  background-color: #66b3ff !important;
+  border-color: #66b3ff !important;
+  color: #000 !important;
+}
+
+.chapter-link {
+  color: #212529;
+}
+
+.chapter-link:hover {
+  color: #0056b3;
+}
+
+body.dark-mode .chapter-link {
+  color: #ffffff !important;
+}
+
+body.dark-mode .chapter-link:hover {
+  color: #99ccff !important;
+}
+
+.manga-library-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.manga-library-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+body.dark-mode .manga-library-card:hover {
+  box-shadow: 0 4px 12px rgba(102, 179, 255, 0.3);
+}
+
+/* Authentication Components Dark Mode */
+body.dark-mode .modal-content {
+  background-color: #2a2a2a;
+  color: #e0e0e0;
+  border-color: #404040;
+}
+
+body.dark-mode .modal-header {
+  border-bottom-color: #404040;
+}
+
+body.dark-mode .modal-footer {
+  border-top-color: #404040;
+}
+
+body.dark-mode .dropdown-menu {
+  background-color: #2a2a2a;
+  border-color: #404040;
+}
+
+body.dark-mode .dropdown-item {
+  color: #e0e0e0;
+}
+
+body.dark-mode .dropdown-item:hover,
+body.dark-mode .dropdown-item:focus {
+  background-color: #353535;
+  color: #ffffff;
+}
+
+body.dark-mode .dropdown-divider {
+  border-top-color: #404040;
+}
+
+body.dark-mode .alert {
+  background-color: #2a2a2a;
+  border-color: #404040;
+}
+
+body.dark-mode .alert-danger {
+  background-color: #3d2020;
+  color: #ff6b6b;
+  border-color: #5a2020;
+}
+
+body.dark-mode .alert-success {
+  background-color: #203d20;
+  color: #6bff6b;
+  border-color: #205a20;
+}
+
+body.dark-mode .alert-warning {
+  background-color: #3d3520;
+  color: #ffcc6b;
+  border-color: #5a4e20;
+}
+
+body.dark-mode .btn-light {
+  background-color: #e0e0e0;
+  border-color: #e0e0e0;
+  color: #000;
+}
+
+body.dark-mode .btn-light:hover {
+  background-color: #f0f0f0;
+  border-color: #f0f0f0;
+  color: #000;
 }
 
 code {

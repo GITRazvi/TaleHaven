@@ -2,18 +2,7 @@ import React, { useEffect } from 'react';
 import { Row, Col } from 'react-bootstrap';
 import SearchResult from './search-result';
 import Backend from '../../app/clients/backend/backend';
-
-type BookInfo = {
-    Title: string;
-    Authors: string[];
-    Id: string;
-    Description: string;
-    Categories: string[];
-    Thumbnail: string;
-    Rating: number;
-    RatingCount: number;
-    PublishedDate: string;
-};
+import { BookInfo } from '../../app/clients/backend/types';
 
 interface SearchProps {
     query: string;

@@ -1,17 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-
-type BookInfo = {
-    Title: string;
-    Authors: string[];
-    Id: string;
-    Description: string;
-    Categories: string[];
-    Thumbnail: string;
-    Rating: number;
-    RatingCount: number;
-    PublishedDate: string;
-};
+import { BookInfo } from '../../app/clients/backend/types';
 
 interface SearchResultProps {
     result: BookInfo;

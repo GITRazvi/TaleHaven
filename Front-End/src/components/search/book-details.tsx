@@ -1,16 +1,8 @@
 import React from 'react';
+import { BookInfo } from '../../app/clients/backend/types';
 
 interface BookDetailsProps {
-    book: {
-        Title: string;
-        Authors: string[];
-        Description: string;
-        Categories: string[];
-        Thumbnail: string;
-        Rating: number;
-        RatingCount: number;
-        PublishedDate: string;
-    };
+    book: BookInfo;
 
 }
 
