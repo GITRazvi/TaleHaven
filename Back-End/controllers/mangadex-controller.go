@@ -232,6 +232,12 @@ func getChapters(c *gin.Context) {
 	// Parse optional parameters
 	limit := parseIntQuery(c, "limit", 100)
 	offset := parseIntQuery(c, "offset", 0)
+	if limit < 1 || limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	languages := c.QueryArray("translatedLanguage[]")
 	if len(languages) == 0 {
 		languages = []string{"en"} // Default to English
@@ -367,6 +373,18 @@ func streamChapterPages(c *gin.Context) {
 	}
 
 	quality := c.DefaultQuery("quality", "data")
+	startPage := 1
+	if requestedStartPage := c.Query("startPage"); requestedStartPage != "" {
+		parsedStartPage, err := strconv.Atoi(requestedStartPage)
+		if err != nil || parsedStartPage < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Invalid parameter",
+				"message": "startPage must be a positive integer",
+			})
+			return
+		}
+		startPage = parsedStartPage
+	}
 
 	// SSE headers
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
@@ -375,15 +393,17 @@ func streamChapterPages(c *gin.Context) {
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Status(http.StatusOK)
 
-	// Announce stream start quickly so frontend can show loader immediately.
-	c.SSEvent("start", gin.H{
-		"result":    "ok",
-		"chapterId": chapterID,
-		"message":   "Starting progressive download",
-	})
-	c.Writer.Flush()
-
-	result, err := mangadex_api.DownloadChapterPagesProgressively(chapterID, quality, func(event mangadex_api.PageDownloadEvent) error {
+	result, err := mangadex_api.DownloadChapterPagesProgressively(chapterID, quality, startPage, func(totalPages, resolvedStartPage int) error {
+		c.SSEvent("start", gin.H{
+			"result":     "ok",
+			"chapterId":  chapterID,
+			"message":    "Starting progressive download",
+			"totalPages": totalPages,
+			"startPage":  resolvedStartPage,
+		})
+		c.Writer.Flush()
+		return nil
+	}, func(event mangadex_api.PageDownloadEvent) error {
 		select {
 		case <-c.Request.Context().Done():
 			return fmt.Errorf("client disconnected")
@@ -444,6 +464,7 @@ func streamChapterPages(c *gin.Context) {
 		"mangaId":      result.MangaID,
 		"totalPages":   result.TotalPages,
 		"successCount": result.SuccessCount,
+		"startPage":    result.StartPage,
 	})
 	c.Writer.Flush()
 }

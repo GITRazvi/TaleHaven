@@ -9,6 +9,7 @@ import LoginPage from './auth/login-page';
 import RegisterPage from './auth/register-page';
 import ProfilePage from './auth/profile-page';
 import ProtectedRoute from './auth/ProtectedRoute';
+import LibraryPage from './library/library-page';
 import { AuthProvider } from '../contexts/AuthContext';
 
 // Wrapper to force remount when chapter changes
@@ -34,6 +35,11 @@ const App: React.FC = () => {
                     <Route path="/profile" element={
                         <ProtectedRoute>
                             <ProfilePage />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/library" element={
+                        <ProtectedRoute>
+                            <LibraryPage />
                         </ProtectedRoute>
                     } />
                     <Route path="/manga/search" element={<MangaSearchPage />} />

@@ -86,18 +86,18 @@ func GetMangaByMangaDexID(mangadexID string) (*Manga, error) {
 		&manga.ID,
 		&manga.MangaDexID,
 		&manga.Title,
-		pq.Array(&manga.AlternativeTitles),
+		&manga.AlternativeTitles,
 		&manga.Description,
 		&manga.Author,
 		&manga.Artist,
-		pq.Array(&manga.Tags),
+		&manga.Tags,
 		&manga.Status,
 		&manga.ContentRating,
 		&manga.Year,
 		&manga.LastChapter,
 		&manga.LastVolume,
 		&manga.OriginalLanguage,
-		pq.Array(&manga.AvailableLanguages),
+		&manga.AvailableLanguages,
 		&manga.CoverImagePath,
 		&manga.CoverFileName,
 		&manga.CreatedAt,
@@ -266,7 +266,7 @@ func GetChapterPages(chapterID int) ([]ChapterPage, error) {
 // UpdateChapterDownloadStatus updates the downloaded status of a chapter
 func UpdateChapterDownloadStatus(chapterID int, downloaded bool) error {
 	query := `UPDATE chapters SET downloaded = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`
-	
+
 	_, err := DB.Exec(query, downloaded, chapterID)
 	if err != nil {
 		utils.Logger.Error("Failed to update chapter download status", zap.Error(err), zap.Int("chapter_id", chapterID))
@@ -362,6 +362,97 @@ type DownloadedMangaInfo struct {
 	CoverImagePath string `json:"cover_image_path" db:"cover_image_path"`
 }
 
+// UserLibraryMangaInfo is the data needed to render a user's saved manga.
+type UserLibraryMangaInfo struct {
+	MangaDexID     string `json:"mangadexId"`
+	Title          string `json:"title"`
+	CoverFileName  string `json:"coverFileName"`
+	CoverImagePath string `json:"coverImagePath"`
+	AddedAt        string `json:"addedAt"`
+}
+
+// AddMangaToUserLibrary saves a manga to a user's library. The operation is
+// idempotent so repeated clicks cannot create duplicate entries.
+func AddMangaToUserLibrary(userID, mangaID int) (bool, error) {
+	result, err := DB.Exec(`
+		INSERT INTO user_library_manga (user_id, manga_id)
+		VALUES ($1, $2)
+		ON CONFLICT (user_id, manga_id) DO NOTHING
+	`, userID, mangaID)
+	if err != nil {
+		return false, fmt.Errorf("failed to add manga to user library: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to confirm library insert: %w", err)
+	}
+
+	return rowsAffected > 0, nil
+}
+
+// RemoveMangaFromUserLibrary removes a saved manga. It is idempotent so the
+// desired end state is the same even when a client retries the request.
+func RemoveMangaFromUserLibrary(userID int, mangaDexID string) (bool, error) {
+	result, err := DB.Exec(`
+		DELETE FROM user_library_manga ulm
+		USING manga m
+		WHERE ulm.manga_id = m.id
+		  AND ulm.user_id = $1
+		  AND m.mangadex_id = $2
+	`, userID, mangaDexID)
+	if err != nil {
+		return false, fmt.Errorf("failed to remove manga from user library: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to confirm library deletion: %w", err)
+	}
+
+	return rowsAffected > 0, nil
+}
+
+// GetUserLibraryPage returns a page of manga explicitly saved by one user,
+// newest first, together with the full saved-title count.
+func GetUserLibraryPage(userID, limit, offset int) ([]UserLibraryMangaInfo, int, error) {
+	var total int
+	if err := DB.QueryRow("SELECT COUNT(*) FROM user_library_manga WHERE user_id = $1", userID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count user library: %w", err)
+	}
+
+	rows, err := DB.Query(`
+		SELECT m.mangadex_id,
+		       m.title,
+		       COALESCE(m.cover_filename, ''),
+		       COALESCE(m.cover_image_path, ''),
+		       TO_CHAR(ulm.added_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		FROM user_library_manga ulm
+		INNER JOIN manga m ON m.id = ulm.manga_id
+		WHERE ulm.user_id = $1
+		ORDER BY ulm.added_at DESC, m.title ASC
+		LIMIT $2 OFFSET $3
+	`, userID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to retrieve user library: %w", err)
+	}
+	defer rows.Close()
+
+	library := make([]UserLibraryMangaInfo, 0)
+	for rows.Next() {
+		var manga UserLibraryMangaInfo
+		if err := rows.Scan(&manga.MangaDexID, &manga.Title, &manga.CoverFileName, &manga.CoverImagePath, &manga.AddedAt); err != nil {
+			return nil, 0, fmt.Errorf("failed to read user library manga: %w", err)
+		}
+		library = append(library, manga)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("failed while reading user library: %w", err)
+	}
+
+	return library, total, nil
+}
+
 // GetDownloadedMangaWithCovers returns all manga that have downloaded chapters and cover images
 func GetDownloadedMangaWithCovers() ([]DownloadedMangaInfo, error) {
 	query := `
@@ -395,4 +486,3 @@ func GetDownloadedMangaWithCovers() ([]DownloadedMangaInfo, error) {
 	utils.Logger.Info("Retrieved downloaded manga with covers", zap.Int("count", len(mangaList)))
 	return mangaList, nil
 }
-

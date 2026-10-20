@@ -201,6 +201,22 @@ func GetMangaProgress(userID int, mangaID string) (*MangaProgress, error) {
 		}
 	}
 
+	redisProgress, err := getAllRedisProgress(userID)
+	if err != nil {
+		utils.Logger.Warn("Failed to load live Redis progress for manga", zap.Error(err), zap.Int("userId", userID), zap.String("mangaId", mangaID))
+	} else {
+		for _, progress := range redisProgress {
+			if progress.MangaID != mangaID {
+				continue
+			}
+
+			stored, exists := mangaProgress.Chapters[progress.ChapterID]
+			if !exists || progress.LastReadAt.After(stored.LastReadAt) {
+				mangaProgress.Chapters[progress.ChapterID] = progress
+			}
+		}
+	}
+
 	if len(mangaProgress.Chapters) == 0 {
 		return nil, nil
 	}
@@ -269,6 +285,27 @@ func GetAllReadingProgress(userID int) (*UserReadingData, error) {
 		}
 		if lastReadAt.After(userData.UpdatedAt) {
 			userData.UpdatedAt = lastReadAt
+		}
+	}
+
+	redisProgress, err := getAllRedisProgress(userID)
+	if err != nil {
+		utils.Logger.Warn("Failed to load live Redis progress", zap.Error(err), zap.Int("userId", userID))
+		return userData, nil
+	}
+
+	for _, progress := range redisProgress {
+		if _, exists := userData.Mangas[progress.MangaID]; !exists {
+			userData.Mangas[progress.MangaID] = &MangaProgress{
+				MangaID:   progress.MangaID,
+				Chapters:  make(map[string]*ReadingProgress),
+				UpdatedAt: progress.LastReadAt,
+			}
+		}
+
+		stored, exists := userData.Mangas[progress.MangaID].Chapters[progress.ChapterID]
+		if !exists || progress.LastReadAt.After(stored.LastReadAt) {
+			userData.Mangas[progress.MangaID].Chapters[progress.ChapterID] = progress
 		}
 	}
 
@@ -452,6 +489,42 @@ func saveToRedis(progress *ReadingProgress) error {
 	return nil
 }
 
+// getAllRedisProgress returns the live, not-yet-synced chapter progress for a user.
+func getAllRedisProgress(userID int) ([]*ReadingProgress, error) {
+	pattern := fmt.Sprintf("progress:%d:*", userID)
+	progresses := make([]*ReadingProgress, 0)
+	var cursor uint64
+
+	for {
+		keys, nextCursor, err := cache.Client.Scan(cache.Ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return nil, fmt.Errorf("redis scan error: %w", err)
+		}
+
+		for _, key := range keys {
+			data, err := cache.Client.Get(cache.Ctx, key).Bytes()
+			if err != nil {
+				continue
+			}
+
+			var progress ReadingProgress
+			if err := json.Unmarshal(data, &progress); err != nil {
+				utils.Logger.Warn("Failed to parse Redis reading progress", zap.Error(err), zap.String("key", key))
+				continue
+			}
+
+			progresses = append(progresses, &progress)
+		}
+
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	return progresses, nil
+}
+
 // ============================================================================
 // INTERNAL HELPERS - PostgreSQL Operations
 // ============================================================================
@@ -514,4 +587,3 @@ func saveToPostgres(progress *ReadingProgress) error {
 
 	return nil
 }
-

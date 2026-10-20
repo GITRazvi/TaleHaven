@@ -776,6 +776,14 @@ paths:
             type: string
             enum: [data, saver]
           example: data
+        - name: startPage
+          in: query
+          required: false
+          description: One-based page at which to begin the progressive stream.
+          schema:
+            type: integer
+            minimum: 1
+          example: 24
       responses:
         '200':
           description: Local page paths
@@ -814,7 +822,7 @@ paths:
             text/event-stream:
               example: |
                 event:start
-                data:{"result":"ok","chapterId":"...","message":"Starting progressive download"}
+                data:{"result":"ok","chapterId":"...","message":"Starting progressive download","totalPages":53,"startPage":24}
 
                 event:page
                 data:{"chapterId":"...","mangaId":"...","pageNumber":1,"totalPages":53,"pageUrl":"/images/manga/.../1.jpg","downloaded":true}

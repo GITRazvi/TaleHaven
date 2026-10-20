@@ -87,6 +87,9 @@ const HorizontalNavbar: React.FC<NavbarProps> = ({ searchQuery, setSearchQuery }
                                 <NavDropdown.Item as={Link} to="/profile">
                                     My Profile
                                 </NavDropdown.Item>
+                                <NavDropdown.Item as={Link} to="/library">
+                                    My Library
+                                </NavDropdown.Item>
                                 <NavDropdown.Divider />
                                 <NavDropdown.Item onClick={handleLogout}>
                                     Logout

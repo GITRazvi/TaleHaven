@@ -1,0 +1,70 @@
+{"level":"INFO","time":"2026-10-20T11:58:27.606+0300","msg":"Connected to Redis","pong":"PONG"}
+{"level":"INFO","time":"2026-10-20T11:58:27.629+0300","msg":"PostgreSQL connection established successfully","host":"localhost","port":"5433","database":"talehaven"}
+{"level":"INFO","time":"2026-10-20T11:58:27.630+0300","msg":"Running database migrations..."}
+{"level":"INFO","time":"2026-10-20T11:58:27.677+0300","msg":"Migration executed successfully","migration":"users_table"}
+{"level":"INFO","time":"2026-10-20T11:58:27.706+0300","msg":"Migration executed successfully","migration":"sessions_table"}
+{"level":"INFO","time":"2026-10-20T11:58:27.737+0300","msg":"Migration executed successfully","migration":"manga_table"}
+{"level":"INFO","time":"2026-10-20T11:58:27.774+0300","msg":"Migration executed successfully","migration":"chapters_table"}
+{"level":"INFO","time":"2026-10-20T11:58:27.805+0300","msg":"Migration executed successfully","migration":"chapter_pages_table"}
+{"level":"INFO","time":"2026-10-20T11:58:27.806+0300","msg":"All database migrations completed successfully"}
+{"level":"INFO","time":"2026-10-20T11:58:27.806+0300","msg":"Manga cleanup service started (runs daily)"}
+{"level":"INFO","time":"2026-10-20T11:58:27.806+0300","msg":"Starting manga cleanup process"}
+{"level":"INFO","time":"2026-10-20T11:58:27.806+0300","msg":"Static file serving enabled for /images"}
+{"level":"INFO","time":"2026-10-20T11:58:27.806+0300","msg":"Reading progress routes initialized"}
+{"level":"INFO","time":"2026-10-20T11:58:27.806+0300","msg":"Server Running on Port: 3001","SERVER_ADDRESS":"127.0.0.1:3001"}
+{"level":"INFO","time":"2026-10-20T11:58:27.808+0300","msg":"Found inactive manga","count":0,"total":0}
+{"level":"INFO","time":"2026-10-20T11:58:27.808+0300","msg":"No inactive manga found to clean up"}
+{"level":"INFO","time":"2026-10-20T11:58:31.278+0300","msg":"Session created","sessionId":"ecf88cb5871b38400b94020b70e11ca447ddd29b5bf8a2e5f98b9914edeb4d87"}
+{"level":"INFO","time":"2026-10-20T11:58:31.283+0300","msg":"New session created","sessionId":"ecf88cb5871b38400b94020b70e11ca447ddd29b5bf8a2e5f98b9914edeb4d87","ip":"127.0.0.1"}
+{"level":"INFO","time":"2026-10-20T11:58:31.283+0300","msg":"REQUEST_COMPLETED","method":"GET","path":"/","client_ip":"127.0.0.1","status":404,"duration":"8.5833ms","contextLogs":{"response":{"error":"Route not found","message":"The requested URL was not found on the server"}}}
+{"level":"INFO","time":"2026-10-20T11:58:48.608+0300","msg":"Session created","sessionId":"1b808876f7453aebd91e75cd954b2ec0b4da3b79da21de2675bd3257f2f26d95"}
+{"level":"INFO","time":"2026-10-20T11:58:48.610+0300","msg":"New session created","sessionId":"1b808876f7453aebd91e75cd954b2ec0b4da3b79da21de2675bd3257f2f26d95","ip":"::1"}
+{"level":"INFO","time":"2026-10-20T11:58:48.610+0300","msg":"Getting manga by ID","mangaId":"popular"}
+{"level":"INFO","time":"2026-10-20T11:58:48.611+0300","msg":"Making MangaDex API request","url":"https://api.mangadex.org/manga/popular?includes[]=cover_art&includes[]=author&includes[]=artist"}
+{"level":"INFO","time":"2026-10-20T11:58:48.625+0300","msg":"Session created","sessionId":"5ed27632b2a2ef493f6b18a9341a06678c975ae7ba124131a33c18e546e85226"}
+{"level":"INFO","time":"2026-10-20T11:58:48.625+0300","msg":"New session created","sessionId":"5ed27632b2a2ef493f6b18a9341a06678c975ae7ba124131a33c18e546e85226","ip":"::1"}
+{"level":"INFO","time":"2026-10-20T11:58:48.625+0300","msg":"REQUEST_COMPLETED","method":"GET","path":"/auth/me","client_ip":"::1","status":404,"duration":"20.0639ms","contextLogs":{"response":{"error":"Route not found","message":"The requested URL was not found on the server"}}}
+{"level":"INFO","time":"2026-10-20T11:58:48.629+0300","msg":"Session created","sessionId":"82e622ae9272630df3b809d11dac48641ada964be60e9dd027a9c03b2a65b3fe"}
+{"level":"INFO","time":"2026-10-20T11:58:48.629+0300","msg":"New session created","sessionId":"82e622ae9272630df3b809d11dac48641ada964be60e9dd027a9c03b2a65b3fe","ip":"::1"}
+{"level":"INFO","time":"2026-10-20T11:58:48.629+0300","msg":"REQUEST_COMPLETED","method":"GET","path":"/auth/me","client_ip":"::1","status":404,"duration":"3.0339ms","contextLogs":{"response":{"error":"Route not found","message":"The requested URL was not found on the server"}}}
+{"level":"ERROR","time":"2026-10-20T11:58:49.571+0300","msg":"MangaDex API returned non-200 status","status":404}
+{"level":"ERROR","time":"2026-10-20T11:58:49.575+0300","msg":"Failed to get manga","error":"MangaDex API error: 404 Not Found"}
+{"level":"INFO","time":"2026-10-20T11:58:49.575+0300","msg":"REQUEST_COMPLETED","method":"GET","path":"/manga/popular","client_ip":"::1","status":500,"duration":"970.9552ms","contextLogs":{}}
+{"level":"INFO","time":"2026-10-20T11:58:49.581+0300","msg":"Session created","sessionId":"411c4f8154ff2424bcbc2c81fb839e3401fe99c616505a22d8d482f3e6394757"}
+{"level":"INFO","time":"2026-10-20T11:58:49.582+0300","msg":"New session created","sessionId":"411c4f8154ff2424bcbc2c81fb839e3401fe99c616505a22d8d482f3e6394757","ip":"::1"}
+{"level":"INFO","time":"2026-10-20T11:58:49.582+0300","msg":"Getting manga by ID","mangaId":"popular"}
+{"level":"INFO","time":"2026-10-20T11:58:49.584+0300","msg":"Making MangaDex API request","url":"https://api.mangadex.org/manga/popular?includes[]=cover_art&includes[]=author&includes[]=artist"}
+{"level":"ERROR","time":"2026-10-20T11:58:49.817+0300","msg":"MangaDex API returned non-200 status","status":404}
+{"level":"ERROR","time":"2026-10-20T11:58:49.818+0300","msg":"Failed to get manga","error":"MangaDex API error: 404 Not Found"}
+{"level":"INFO","time":"2026-10-20T11:58:49.819+0300","msg":"REQUEST_COMPLETED","method":"GET","path":"/manga/popular","client_ip":"::1","status":500,"duration":"241.4456ms","contextLogs":{}}
+{"level":"INFO","time":"2026-10-20T11:59:00.414+0300","msg":"Session created","sessionId":"429a17e28f4b8df8089d0a904bad5f352d9b3865f6bc1139d8782dbf1f44e4c4"}
+{"level":"INFO","time":"2026-10-20T11:59:00.415+0300","msg":"New session created","sessionId":"429a17e28f4b8df8089d0a904bad5f352d9b3865f6bc1139d8782dbf1f44e4c4","ip":"127.0.0.1"}
+{"level":"INFO","time":"2026-10-20T11:59:00.415+0300","msg":"Getting manga by ID","mangaId":"popular"}
+{"level":"INFO","time":"2026-10-20T11:59:00.416+0300","msg":"Making MangaDex API request","url":"https://api.mangadex.org/manga/popular?includes[]=cover_art&includes[]=author&includes[]=artist"}
+{"level":"ERROR","time":"2026-10-20T11:59:00.712+0300","msg":"MangaDex API returned non-200 status","status":404}
+{"level":"ERROR","time":"2026-10-20T11:59:00.716+0300","msg":"Failed to get manga","error":"MangaDex API error: 404 Not Found"}
+{"level":"INFO","time":"2026-10-20T11:59:00.716+0300","msg":"REQUEST_COMPLETED","method":"GET","path":"/manga/popular","client_ip":"127.0.0.1","status":500,"duration":"305.7656ms","contextLogs":{}}
+{"level":"INFO","time":"2026-10-20T12:00:34.490+0300","msg":"Getting manga by ID","mangaId":"popular"}
+{"level":"INFO","time":"2026-10-20T12:00:34.496+0300","msg":"REQUEST_COMPLETED","method":"GET","path":"/auth/me","client_ip":"::1","status":404,"duration":"19.2485ms","contextLogs":{"response":{"error":"Route not found","message":"The requested URL was not found on the server"}}}
+{"level":"INFO","time":"2026-10-20T12:00:34.496+0300","msg":"Making MangaDex API request","url":"https://api.mangadex.org/manga/popular?includes[]=cover_art&includes[]=author&includes[]=artist"}
+{"level":"INFO","time":"2026-10-20T12:00:34.505+0300","msg":"REQUEST_COMPLETED","method":"GET","path":"/auth/me","client_ip":"::1","status":404,"duration":"7.5708ms","contextLogs":{"response":{"error":"Route not found","message":"The requested URL was not found on the server"}}}
+{"level":"ERROR","time":"2026-10-20T12:00:35.254+0300","msg":"MangaDex API returned non-200 status","status":404}
+{"level":"ERROR","time":"2026-10-20T12:00:35.259+0300","msg":"Failed to get manga","error":"MangaDex API error: 404 Not Found"}
+{"level":"INFO","time":"2026-10-20T12:00:35.259+0300","msg":"REQUEST_COMPLETED","method":"GET","path":"/manga/popular","client_ip":"::1","status":500,"duration":"781.9393ms","contextLogs":{}}
+{"level":"INFO","time":"2026-10-20T12:00:35.264+0300","msg":"Getting manga by ID","mangaId":"popular"}
+{"level":"INFO","time":"2026-10-20T12:00:35.265+0300","msg":"Making MangaDex API request","url":"https://api.mangadex.org/manga/popular?includes[]=cover_art&includes[]=author&includes[]=artist"}
+{"level":"ERROR","time":"2026-10-20T12:00:35.594+0300","msg":"MangaDex API returned non-200 status","status":404}
+{"level":"ERROR","time":"2026-10-20T12:00:35.595+0300","msg":"Failed to get manga","error":"MangaDex API error: 404 Not Found"}
+{"level":"INFO","time":"2026-10-20T12:00:35.595+0300","msg":"REQUEST_COMPLETED","method":"GET","path":"/manga/popular","client_ip":"::1","status":500,"duration":"335.5846ms","contextLogs":{}}
+{"level":"INFO","time":"2026-10-20T12:00:36.030+0300","msg":"REQUEST_COMPLETED","method":"GET","path":"/auth/me","client_ip":"::1","status":404,"duration":"4.9772ms","contextLogs":{"response":{"error":"Route not found","message":"The requested URL was not found on the server"}}}
+{"level":"INFO","time":"2026-10-20T12:00:36.035+0300","msg":"Getting manga by ID","mangaId":"popular"}
+{"level":"INFO","time":"2026-10-20T12:00:36.036+0300","msg":"Making MangaDex API request","url":"https://api.mangadex.org/manga/popular?includes[]=cover_art&includes[]=author&includes[]=artist"}
+{"level":"INFO","time":"2026-10-20T12:00:36.039+0300","msg":"REQUEST_COMPLETED","method":"GET","path":"/auth/me","client_ip":"::1","status":404,"duration":"3.8405ms","contextLogs":{"response":{"error":"Route not found","message":"The requested URL was not found on the server"}}}
+{"level":"ERROR","time":"2026-10-20T12:00:36.457+0300","msg":"MangaDex API returned non-200 status","status":404}
+{"level":"ERROR","time":"2026-10-20T12:00:36.463+0300","msg":"Failed to get manga","error":"MangaDex API error: 404 Not Found"}
+{"level":"INFO","time":"2026-10-20T12:00:36.463+0300","msg":"REQUEST_COMPLETED","method":"GET","path":"/manga/popular","client_ip":"::1","status":500,"duration":"438.4937ms","contextLogs":{}}
+{"level":"INFO","time":"2026-10-20T12:00:36.467+0300","msg":"Getting manga by ID","mangaId":"popular"}
+{"level":"INFO","time":"2026-10-20T12:00:36.469+0300","msg":"Making MangaDex API request","url":"https://api.mangadex.org/manga/popular?includes[]=cover_art&includes[]=author&includes[]=artist"}
+{"level":"ERROR","time":"2026-10-20T12:00:36.708+0300","msg":"MangaDex API returned non-200 status","status":404}
+{"level":"ERROR","time":"2026-10-20T12:00:36.712+0300","msg":"Failed to get manga","error":"MangaDex API error: 404 Not Found"}
+{"level":"INFO","time":"2026-10-20T12:00:36.712+0300","msg":"REQUEST_COMPLETED","method":"GET","path":"/manga/popular","client_ip":"::1","status":500,"duration":"248.7415ms","contextLogs":{}}

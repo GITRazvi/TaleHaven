@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Spinner } from 'react-bootstrap';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import Backend from '../../app/clients/backend/backend';
@@ -17,6 +17,35 @@ const normalizePagePath = (path: string): string => {
   return normalized;
 };
 
+const readLocalizedText = (value: unknown): string => {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (value && typeof value === 'object') {
+    const localized = value as Record<string, unknown>;
+    const preferred = localized.en ?? Object.values(localized)[0];
+    return typeof preferred === 'string' ? preferred : '';
+  }
+
+  return '';
+};
+
+const readResponseField = (value: unknown, field: string): unknown => {
+  const data = value as Record<string, unknown> | undefined;
+  const attributes = data?.attributes as Record<string, unknown> | undefined;
+  return data?.[field] ?? attributes?.[field];
+};
+
+type PendingProgress = {
+  chapterId: string;
+  isFinalPage: boolean;
+  mangaId: string;
+  page: number;
+  session: number;
+  totalPages: number;
+};
+
 const MangaReaderPage: React.FC = () => {
   const backend = useMemo(() => new Backend(), []);
   const navigate = useNavigate();
@@ -25,21 +54,180 @@ const MangaReaderPage: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const pageElementsRef = useRef<HTMLDivElement[]>([]);
   const hasScrolledToResume = useRef<boolean>(false);
+  const currentPageRef = useRef<number>(1);
+  const chapterPageCountRef = useRef<number>(0);
+  const progressResolvedRef = useRef<boolean>(false);
+  const lastSavedPageRef = useRef<number | null>(null);
+  const completionSyncedRef = useRef<boolean>(false);
+  const pendingProgressRef = useRef<PendingProgress | null>(null);
+  const isPersistingProgressRef = useRef<boolean>(false);
+  const readerSessionRef = useRef<number>(0);
 
-  // Get chapter IDs from navigation state (passed from manga details page)
+  // Get chapter IDs and an optional explicit starting page from navigation state.
+  // An explicit start page is used by “Read from page 1” and takes precedence
+  // over saved reading progress.
   const chapterIds = useMemo(() => {
     return (location.state as { chapterIds?: string[] })?.chapterIds || [];
   }, [location.state]);
+  const startAtPage = useMemo(() => {
+    const requestedPage = (location.state as { startAtPage?: unknown } | null)?.startAtPage;
+    return typeof requestedPage === 'number' && Number.isInteger(requestedPage) && requestedPage >= 1
+      ? requestedPage
+      : null;
+  }, [location.state]);
 
   const [loadedPagesCount, setLoadedPagesCount] = useState<number>(0);
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const [resumePage, setResumePage] = useState<number>(1);
+  const [renderedPagesCount, setRenderedPagesCount] = useState<number>(0);
+  const [resumePage, setResumePage] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [loadingMessage, setLoadingMessage] = useState<string>('Loading chapter...');
   const [error, setError] = useState<string>('');
   const [saveStatus, setSaveStatus] = useState<string>('');
   const [prevChapterId, setPrevChapterId] = useState<string | null>(null);
   const [nextChapterId, setNextChapterId] = useState<string | null>(null);
+  const [mangaTitle, setMangaTitle] = useState<string>('');
+  const [chapterNumber, setChapterNumber] = useState<string>('');
+
+  const preserveViewport = (applyChange: () => void) => {
+    const viewportCenter = window.innerHeight / 2;
+    const anchor = pageElementsRef.current
+      .filter((element): element is HTMLDivElement => Boolean(element) && element.dataset.pageLoaded === 'true')
+      .map((element) => ({
+        element,
+        bounds: element.getBoundingClientRect(),
+      }))
+      .filter(({ bounds }) => bounds.bottom > 0 && bounds.top < window.innerHeight)
+      .sort((first, second) => {
+        const firstDistance = Math.abs((first.bounds.top + first.bounds.bottom) / 2 - viewportCenter);
+        const secondDistance = Math.abs((second.bounds.top + second.bounds.bottom) / 2 - viewportCenter);
+        return firstDistance - secondDistance;
+      })[0];
+
+    if (!anchor) {
+      applyChange();
+      return;
+    }
+
+    const previousTop = anchor.element.getBoundingClientRect().top;
+    applyChange();
+    window.requestAnimationFrame(() => {
+      if (!document.contains(anchor.element)) {
+        return;
+      }
+
+      const layoutShift = anchor.element.getBoundingClientRect().top - previousTop;
+      if (Math.abs(layoutShift) > 0.5) {
+        window.scrollBy(0, layoutShift);
+      }
+    });
+  };
+
+  const flushProgressQueue = useCallback(async () => {
+    if (isPersistingProgressRef.current) {
+      return;
+    }
+
+    isPersistingProgressRef.current = true;
+    try {
+      while (pendingProgressRef.current) {
+        const progress = pendingProgressRef.current;
+        pendingProgressRef.current = null;
+
+        try {
+          await backend.saveReadingProgress({
+            mangaId: progress.mangaId,
+            chapterId: progress.chapterId,
+            currentPage: progress.page,
+            totalPages: progress.totalPages,
+          });
+          await backend.syncReadingProgress(progress.chapterId);
+
+          if (progress.session === readerSessionRef.current) {
+            setSaveStatus(progress.isFinalPage ? '✓ Chapter marked as read' : '✓ Progress saved');
+          }
+        } catch (err: any) {
+          if (progress.session !== readerSessionRef.current) {
+            continue;
+          }
+
+          if (progress.isFinalPage) {
+            completionSyncedRef.current = false;
+          }
+          if (err?.status === 401) {
+            setSaveStatus('💡 Sign in to save progress');
+          } else {
+            console.warn('[Reader] Failed to save progress:', err);
+            setSaveStatus('⚠ Could not save progress');
+          }
+        }
+      }
+    } finally {
+      isPersistingProgressRef.current = false;
+    }
+  }, [backend]);
+
+  const persistPage = useCallback((page: number) => {
+    if (
+      !mangaId ||
+      !chapterId ||
+      chapterPageCountRef.current < 1 ||
+      lastSavedPageRef.current === page
+    ) {
+      return;
+    }
+
+    const isFinalPage = page === chapterPageCountRef.current && !completionSyncedRef.current;
+    if (isFinalPage) {
+      completionSyncedRef.current = true;
+    }
+
+    lastSavedPageRef.current = page;
+    pendingProgressRef.current = {
+      mangaId,
+      chapterId,
+      page,
+      totalPages: chapterPageCountRef.current,
+      isFinalPage,
+      session: readerSessionRef.current,
+    };
+    void flushProgressQueue();
+  }, [chapterId, flushProgressQueue, mangaId]);
+
+  useEffect(() => {
+    let isCurrent = true;
+
+    const loadReaderHeader = async () => {
+      if (!mangaId || !chapterId) {
+        return;
+      }
+
+      try {
+        const [mangaResponse, chapterResponse] = await Promise.all([
+          backend.getManga(mangaId),
+          backend.getChapter(chapterId),
+        ]);
+
+        if (!isCurrent) {
+          return;
+        }
+
+        const title = readLocalizedText(readResponseField(mangaResponse.data, 'title'));
+        const number = readResponseField(chapterResponse.data, 'chapter');
+        setMangaTitle(title || 'Untitled manga');
+        setChapterNumber(number === undefined || number === null || number === '' ? '?' : String(number));
+      } catch {
+        if (isCurrent) {
+          setMangaTitle('Manga reader');
+          setChapterNumber('?');
+        }
+      }
+    };
+
+    loadReaderHeader();
+    return () => {
+      isCurrent = false;
+    };
+  }, [backend, mangaId, chapterId]);
 
 
   useEffect(() => {
@@ -57,8 +245,16 @@ const MangaReaderPage: React.FC = () => {
       setIsLoading(true);
       setError('');
       setLoadedPagesCount(0);
+      setRenderedPagesCount(0);
+      chapterPageCountRef.current = 0;
+      currentPageRef.current = 1;
+      progressResolvedRef.current = false;
+      lastSavedPageRef.current = null;
+      completionSyncedRef.current = false;
+      setResumePage(0);
       hasScrolledToResume.current = false;
       pageElementsRef.current = [];
+      readerSessionRef.current += 1;
 
       // Clear container
       if (containerRef.current) {
@@ -73,7 +269,24 @@ const MangaReaderPage: React.FC = () => {
 
         // @ts-ignore
         const baseUrl = backend.getBaseUrl();
-        const url = `${baseUrl}/chapter/${encodeURIComponent(chapterId)}/pages/stream?quality=data`;
+        let requestedStartPage = startAtPage ?? 1;
+
+        if (startAtPage === null && mangaId) {
+          setLoadingMessage('Finding your last read page...');
+          try {
+            const progress = await backend.getChapterProgress(chapterId, mangaId);
+            const savedPage = progress.data?.currentPage;
+            if (typeof savedPage === 'number' && savedPage >= 1) {
+              requestedStartPage = savedPage;
+            }
+          } catch (err: any) {
+            if (err?.status !== 404 && err?.status !== 401) {
+              console.warn('[Reader] Error loading progress:', err);
+            }
+          }
+        }
+
+        const url = `${baseUrl}/chapter/${encodeURIComponent(chapterId)}/pages/stream?quality=data&startPage=${requestedStartPage}`;
 
         console.log('[Reader] Opening SSE connection:', url);
         console.log('[Reader] Base URL:', baseUrl);
@@ -106,6 +319,26 @@ const MangaReaderPage: React.FC = () => {
           clearTimeout(connectionTimeout);
           const data = JSON.parse((e as MessageEvent).data);
           console.log('[Reader] SSE start event:', data);
+          const totalPages = Number(data.totalPages);
+          if (Number.isInteger(totalPages) && totalPages > 0) {
+            chapterPageCountRef.current = totalPages;
+          }
+
+          const resolvedStartPage = Number(data.startPage);
+          const initialPage = Number.isInteger(resolvedStartPage) && resolvedStartPage > 0
+            ? resolvedStartPage
+            : requestedStartPage;
+          const setInitialPage = (page: number) => {
+            const clampedPage = Number.isInteger(totalPages) && totalPages > 0
+              ? Math.max(1, Math.min(page, totalPages))
+              : Math.max(1, page);
+            currentPageRef.current = clampedPage;
+            setResumePage(clampedPage);
+            progressResolvedRef.current = true;
+          };
+
+          setInitialPage(initialPage);
+
           setIsLoading(false); // Stop showing loading spinner, start showing container
           setLoadingMessage(`Receiving chapter data (${data.totalPages || 0} pages)...`);
         });
@@ -150,7 +383,6 @@ const MangaReaderPage: React.FC = () => {
           const normalizedPath = normalizePagePath(pageUrl);
           const imageUrl = backend.getImageUrl(normalizedPath);
 
-          img.src = imageUrl;
           img.alt = `Chapter page ${pageNumber}`;
           img.style.width = '100%';
           img.style.maxWidth = '980px';
@@ -174,8 +406,12 @@ const MangaReaderPage: React.FC = () => {
           // Image load handler
           img.onload = () => {
             clearTimeout(timeoutId); // Cancel timeout
-            placeholder.remove();
-            img.style.display = 'block';
+            preserveViewport(() => {
+              placeholder.remove();
+              img.style.display = 'block';
+              pageContainer.dataset.pageLoaded = 'true';
+            });
+            setRenderedPagesCount((previous) => previous + 1);
             console.log('[Reader] Image loaded successfully:', pageNumber, imageUrl);
           };
 
@@ -192,13 +428,23 @@ const MangaReaderPage: React.FC = () => {
             `;
           };
 
+          // Attach load handlers before assigning the source. A cached image can
+          // otherwise finish before onload is registered and never update progress.
+          img.src = imageUrl;
+
           // Append to container
           pageContainer.appendChild(placeholder);
           pageContainer.appendChild(img);
 
           if (containerRef.current) {
-            containerRef.current.appendChild(pageContainer);
-            pageElementsRef.current.push(pageContainer);
+            const followingPage = Array.from(containerRef.current.children).find((element) => {
+              const pageIndex = Number(element.getAttribute('data-page-index'));
+              return Number.isInteger(pageIndex) && pageIndex > pageNumber - 1;
+            });
+            preserveViewport(() => {
+              containerRef.current?.insertBefore(pageContainer, followingPage ?? null);
+              pageElementsRef.current[pageNumber - 1] = pageContainer;
+            });
           }
 
           setLoadedPagesCount((prev) => prev + 1);
@@ -227,36 +473,11 @@ const MangaReaderPage: React.FC = () => {
             }
 
             console.log('[Reader] Successfully loaded', data.successCount, 'of', data.totalPages, 'pages');
-
-            // Load reading progress (requires JWT authentication)
-            // API v3.0.0: Checks Redis first, falls back to PostgreSQL
-            // 404 = no saved progress (normal for first-time readers)
-            if (mangaId) {
-              backend.getChapterProgress(chapterId, mangaId)
-                .then((progress) => {
-                  const initialPage = progress.data?.currentPage ?? 1;  // Renamed from lastPage in API v3.0.0
-                  const clampedInitialPage = Math.max(1, Math.min(initialPage, pageElementsRef.current.length));
-                  setCurrentPage(clampedInitialPage);
-                  setResumePage(clampedInitialPage);
-                  console.log('[Reader] Resumed from page:', clampedInitialPage);
-                })
-                .catch((err) => {
-                  // 404 = no saved progress (normal for first-time readers)
-                  // 401 = not authenticated (can still read without auth)
-                  if (err?.status === 404) {
-                    console.info('[Reader] No saved progress found - starting from page 1');
-                  } else if (err?.status === 401) {
-                    console.info('[Reader] Not authenticated - starting from page 1');
-                  } else {
-                    console.warn('[Reader] Error loading progress:', err);
-                  }
-                  setCurrentPage(1);
-                  setResumePage(1);
-                });
-            } else {
-              setCurrentPage(1);
-              setResumePage(1);
+            const totalPages = Number(data.totalPages);
+            if (Number.isInteger(totalPages) && totalPages > 0) {
+              chapterPageCountRef.current = totalPages;
             }
+
           });
 
         // Error event - connection error
@@ -298,7 +519,7 @@ const MangaReaderPage: React.FC = () => {
         cleanup.then((fn) => fn && fn());
       }
     };
-  }, [backend, chapterId, mangaId]);
+  }, [backend, chapterId, mangaId, startAtPage]);
 
   // Load chapters for navigation
   useEffect(() => {
@@ -308,19 +529,21 @@ const MangaReaderPage: React.FC = () => {
     if (chapterIds.length > 0) {
       const currentIndex = chapterIds.indexOf(chapterId);
 
-      if (currentIndex > 0) {
-        setPrevChapterId(chapterIds[currentIndex - 1]);
-      } else {
-        setPrevChapterId(null);
-      }
+      if (currentIndex >= 0) {
+        if (currentIndex > 0) {
+          setPrevChapterId(chapterIds[currentIndex - 1]);
+        } else {
+          setPrevChapterId(null);
+        }
 
-      if (currentIndex >= 0 && currentIndex < chapterIds.length - 1) {
-        setNextChapterId(chapterIds[currentIndex + 1]);
-      } else {
-        setNextChapterId(null);
-      }
+        if (currentIndex < chapterIds.length - 1) {
+          setNextChapterId(chapterIds[currentIndex + 1]);
+        } else {
+          setNextChapterId(null);
+        }
 
-      return;
+        return;
+      }
     }
 
     // Fallback: Try to load from backend if no state provided
@@ -329,7 +552,7 @@ const MangaReaderPage: React.FC = () => {
     const loadChapters = async () => {
       try {
         const chaptersResponse = await backend.getMangaChapters(mangaId, {
-          limit: 500,
+          limit: 100,
           offset: 0,
           translatedLanguage: ['en']
         });
@@ -360,7 +583,7 @@ const MangaReaderPage: React.FC = () => {
   }, [backend, mangaId, chapterId, chapterIds]);
 
   useEffect(() => {
-    if (loadedPagesCount === 0 || resumePage < 1 || hasScrolledToResume.current) {
+    if (loadedPagesCount === 0 || resumePage < 1 || hasScrolledToResume.current || !progressResolvedRef.current) {
       return;
     }
 
@@ -370,92 +593,81 @@ const MangaReaderPage: React.FC = () => {
     }
 
     targetElement.scrollIntoView({ behavior: 'auto', block: 'start' });
+    currentPageRef.current = resumePage;
     hasScrolledToResume.current = true;
-  }, [loadedPagesCount, resumePage]);
+    persistPage(resumePage);
+  }, [loadedPagesCount, persistPage, resumePage]);
 
   useEffect(() => {
-    if (loadedPagesCount === 0) {
+    if (renderedPagesCount === 0) {
       return;
     }
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visibleEntries = entries.filter((entry) => entry.isIntersecting);
-        if (visibleEntries.length === 0) {
-          return;
-        }
+    let animationFrame: number | null = null;
+    const trackVisiblePage = () => {
+      animationFrame = null;
+      const viewportCenter = window.innerHeight / 2;
+      const visiblePages = pageElementsRef.current
+        .filter((element): element is HTMLDivElement => Boolean(element) && element.dataset.pageLoaded === 'true')
+        .map((element) => ({
+          element,
+          page: Number(element.getAttribute('data-page-index')) + 1,
+          bounds: element.getBoundingClientRect(),
+        }))
+        .filter(({ page, bounds }) => Number.isInteger(page) && bounds.bottom > 0 && bounds.top < window.innerHeight);
 
-        const mostVisible = visibleEntries.reduce((best, entry) =>
-          entry.intersectionRatio > best.intersectionRatio ? entry : best
-        );
-
-        const indexAttr = mostVisible.target.getAttribute('data-page-index');
-        const index = indexAttr ? Number(indexAttr) : NaN;
-
-        if (!Number.isNaN(index)) {
-          setCurrentPage(index + 1);
-        }
-      },
-      {
-        root: null,
-        threshold: [0.25, 0.5, 0.75],
+      if (visiblePages.length === 0) {
+        return;
       }
-    );
 
-    pageElementsRef.current.forEach((element) => {
-      if (element) {
-        observer.observe(element);
+      const currentPage = visiblePages.reduce((closest, candidate) => {
+        const closestDistance = Math.abs((closest.bounds.top + closest.bounds.bottom) / 2 - viewportCenter);
+        const candidateDistance = Math.abs((candidate.bounds.top + candidate.bounds.bottom) / 2 - viewportCenter);
+        return candidateDistance < closestDistance ? candidate : closest;
+      });
+
+      currentPageRef.current = currentPage.page;
+      if (hasScrolledToResume.current) {
+        persistPage(currentPage.page);
       }
-    });
+    };
 
-    return () => observer.disconnect();
-  }, [loadedPagesCount]);
-
-  // Auto-save reading progress to Redis (requires JWT authentication)
-  // API v3.0.0: Writes to Redis cache only for fast response (~1-2ms)
-  useEffect(() => {
-    if (!mangaId || !chapterId || loadedPagesCount === 0) {
-      return;
-    }
-
-    const timeout = setTimeout(async () => {
-      try {
-        await backend.saveReadingProgress({
-          mangaId,
-          chapterId,
-          currentPage: currentPage,  // Renamed from lastPage in API v3.0.0
-          totalPages: loadedPagesCount,
-        });
-        setSaveStatus('✓ Progress saved');
-      } catch (err: any) {
-        // 401 = not authenticated (user can still read without saving)
-        if (err?.status === 401) {
-          setSaveStatus('💡 Sign in to save progress');
-        } else {
-          console.warn('[Reader] Failed to save progress:', err);
-          setSaveStatus('⚠ Could not save progress');
-        }
+    const requestTracking = () => {
+      if (animationFrame === null) {
+        animationFrame = window.requestAnimationFrame(trackVisiblePage);
       }
-    }, 300);
+    };
 
-    return () => clearTimeout(timeout);
-  }, [backend, chapterId, currentPage, mangaId, loadedPagesCount]);
+    requestTracking();
+    window.addEventListener('scroll', requestTracking, { passive: true });
+    window.addEventListener('resize', requestTracking);
 
-  // Sync progress to PostgreSQL when leaving chapter
-  // API v3.0.0: Persists Redis cache to database for permanent storage
+    return () => {
+      if (animationFrame !== null) {
+        window.cancelAnimationFrame(animationFrame);
+      }
+      window.removeEventListener('scroll', requestTracking);
+      window.removeEventListener('resize', requestTracking);
+    };
+  }, [persistPage, renderedPagesCount]);
+
+  // Queue the exact active chapter position before leaving it. The queue
+  // serializes writes so it cannot be overwritten by an earlier page request.
   useEffect(() => {
     if (!chapterId) return;
 
-    // Sync on component unmount (user navigates away)
     return () => {
-      backend.syncReadingProgress(chapterId).catch((err) => {
-        // Silent fail - don't show error to user on page navigation
-        if (err?.status !== 401) {
-          console.warn('[Reader] Failed to sync progress to database:', err);
-        }
-      });
+      const currentChapterPage = currentPageRef.current;
+      const totalChapterPages = chapterPageCountRef.current;
+
+      if (!mangaId || totalChapterPages < 1 || !hasScrolledToResume.current) {
+        return;
+      }
+
+      lastSavedPageRef.current = null;
+      persistPage(currentChapterPage);
     };
-  }, [backend, chapterId]);
+  }, [chapterId, mangaId, persistPage]);
 
   // Sync progress to PostgreSQL on tab close/refresh
   // API v3.0.0: Ensures progress is saved to database before leaving
@@ -481,9 +693,22 @@ const MangaReaderPage: React.FC = () => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [backend, chapterId]);
 
+  const ReaderHeader = () => (
+    <div className="d-flex justify-content-between align-items-center mb-3">
+      <h4 className="mb-0">
+        {mangaTitle || 'Loading manga...'}
+        {chapterNumber && ` — Chapter ${chapterNumber}`}
+      </h4>
+      <Button variant="outline-secondary" size="sm" onClick={() => navigate(`/manga/${mangaId}`)}>
+        Back to Manga
+      </Button>
+    </div>
+  );
+
   if (isLoading) {
     return (
       <div className="p-3">
+        <ReaderHeader />
         <Spinner animation="border" size="sm" className="me-2" />
         {loadingMessage}
       </div>
@@ -491,7 +716,12 @@ const MangaReaderPage: React.FC = () => {
   }
 
   if (error) {
-    return <div className="p-3 text-danger">{error}</div>;
+    return (
+      <div className="p-3">
+        <ReaderHeader />
+        <div className="text-danger">{error}</div>
+      </div>
+    );
   }
 
 
@@ -528,12 +758,7 @@ const MangaReaderPage: React.FC = () => {
 
   return (
     <div className="p-3">
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h4 className="mb-0">Chapter Reader</h4>
-        <Button variant="outline-secondary" size="sm" onClick={() => navigate(`/manga/${mangaId}`)}>
-          Back to Manga
-        </Button>
-      </div>
+      <ReaderHeader />
 
       <ChapterNavigation />
 

@@ -28,6 +28,8 @@ import {
   SearchBooksResponse,
   SyncReadingProgressBody,
   UserResponse,
+  UserLibraryParams,
+  UserLibraryResponse,
 } from "./types";
 
 type QueryValue = string | number | boolean | null | undefined;
@@ -270,6 +272,18 @@ export default class Backend {
 
   async getMangaLibrary(): Promise<MangaLibraryResponse> {
     return this.get<MangaLibraryResponse>("/manga/library");
+  }
+
+  async getMyLibrary(params: UserLibraryParams = {}): Promise<UserLibraryResponse> {
+    return this.get<UserLibraryResponse>(`/library${this.buildQuery(params)}`);
+  }
+
+  async addMangaToMyLibrary(mangaId: string): Promise<ApiMessageResponse & { added: boolean }> {
+    return this.post<ApiMessageResponse & { added: boolean }>(`/library/${encodeURIComponent(mangaId)}`);
+  }
+
+  async removeMangaFromMyLibrary(mangaId: string): Promise<ApiMessageResponse & { removed: boolean }> {
+    return this.delete<ApiMessageResponse & { removed: boolean }>(`/library/${encodeURIComponent(mangaId)}`);
   }
 
   getImageUrl(path: string): string {

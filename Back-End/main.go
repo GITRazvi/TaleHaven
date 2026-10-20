@@ -32,7 +32,6 @@ func main() {
 	database.InitPostgres()
 	defer database.CloseDB()
 
-
 	// Add CORS middleware
 	router.Use(corsMiddleware())
 
@@ -86,6 +85,7 @@ func addRoutes(router *gin.Engine) {
 	controllers.AuthController(router)
 
 	controllers.MangaDexController(router)
+	controllers.LibraryController(router)
 	controllers.ReadingProgressController(router)
 
 	router.NoRoute(func(c *gin.Context) {

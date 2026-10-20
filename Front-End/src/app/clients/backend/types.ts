@@ -156,6 +156,27 @@ export type MangaLibraryResponse = {
   data: MangaLibraryItem[];
 };
 
+export type UserLibraryManga = {
+  mangaId: string;
+  title: string;
+  coverUrl: string;
+  addedAt: string;
+};
+
+export type UserLibraryResponse = {
+  result: ApiResult;
+  count: number;
+  total: number;
+  limit: number;
+  offset: number;
+  data: UserLibraryManga[];
+};
+
+export type UserLibraryParams = {
+  limit?: number;
+  offset?: number;
+};
+
 export type ApiError = Error & {
   status?: number;
   details?: unknown;

@@ -7,6 +7,7 @@ type MangaListItem = {
   id: string;
   title: string;
   description: string;
+  coverUrl: string;
 };
 
 // Common manga genres/tags
@@ -69,11 +70,13 @@ const mapMangaItem = (item: unknown): MangaListItem | null => {
   
   const description = typeof source.description === 'string' ? source.description :
                       readLocalizedValue(source.description) || 'No description available.';
+  const coverUrl = typeof source.coverUrl === 'string' ? source.coverUrl : '';
 
   return {
     id,
     title,
     description,
+    coverUrl,
   };
 };
 
@@ -87,6 +90,7 @@ const MangaSearchPage: React.FC = () => {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState<boolean>(false);
   const [results, setResults] = useState<MangaListItem[]>([]);
+  const [coverErrors, setCoverErrors] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
 
@@ -125,6 +129,7 @@ const MangaSearchPage: React.FC = () => {
 
         const mapped = response.data.map(mapMangaItem).filter((item): item is MangaListItem => item !== null);
         setResults(mapped);
+        setCoverErrors(new Set());
       } catch (err) {
         setError((err as Error).message || 'Failed to search manga.');
       } finally {
@@ -237,10 +242,46 @@ const MangaSearchPage: React.FC = () => {
       <Row>
         {results.map((manga) => (
           <Col key={manga.id} xs={12} md={6} lg={4} className="mb-3">
-            <Card style={{ height: '100%', cursor: 'pointer' }} onClick={() => navigate(`/manga/${manga.id}`)}>
-              <Card.Body>
-                <Card.Title>{manga.title}</Card.Title>
-                <Card.Text style={{ maxHeight: '120px', overflow: 'hidden' }}>{manga.description}</Card.Text>
+            <Card className="flex-row h-100 overflow-hidden" style={{ cursor: 'pointer', minHeight: '180px' }} onClick={() => navigate(`/manga/${manga.id}`)}>
+              {manga.coverUrl && !coverErrors.has(manga.id) ? (
+                <Card.Img
+                  src={manga.coverUrl}
+                  alt={`Cover for ${manga.title}`}
+                  crossOrigin="anonymous"
+                  referrerPolicy="no-referrer"
+                  onError={() => setCoverErrors((previous) => new Set(previous).add(manga.id))}
+                  style={{ width: '120px', height: '180px', objectFit: 'cover', flexShrink: 0 }}
+                />
+              ) : (
+                <div
+                  className="d-flex align-items-center justify-content-center text-muted bg-light text-center"
+                  style={{ width: '120px', height: '180px', flexShrink: 0 }}
+                >
+                  No cover available
+                </div>
+              )}
+              <Card.Body className="d-flex flex-column overflow-hidden">
+                <Card.Title
+                  style={{
+                    display: '-webkit-box',
+                    WebkitBoxOrient: 'vertical',
+                    WebkitLineClamp: 2,
+                    overflow: 'hidden',
+                  }}
+                >
+                  {manga.title}
+                </Card.Title>
+                <Card.Text
+                  className="mb-0"
+                  style={{
+                    display: '-webkit-box',
+                    WebkitBoxOrient: 'vertical',
+                    WebkitLineClamp: 5,
+                    overflow: 'hidden',
+                  }}
+                >
+                  {manga.description}
+                </Card.Text>
               </Card.Body>
             </Card>
           </Col>

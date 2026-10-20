@@ -55,6 +55,20 @@ CREATE TABLE IF NOT EXISTS manga (
 CREATE INDEX IF NOT EXISTS idx_manga_title ON manga(title);
 CREATE INDEX IF NOT EXISTS idx_manga_mangadex_id ON manga(mangadex_id);
 
+-- User Library Table
+-- Links a user to the manga titles they explicitly save in their library.
+CREATE TABLE IF NOT EXISTS user_library_manga (
+    user_id INTEGER NOT NULL,
+    manga_id INTEGER NOT NULL,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, manga_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (manga_id) REFERENCES manga(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_library_manga_user_added
+    ON user_library_manga(user_id, added_at DESC);
+
 -- Chapters Table
 -- Stores chapter metadata with references to downloaded images
 CREATE TABLE IF NOT EXISTS chapters (

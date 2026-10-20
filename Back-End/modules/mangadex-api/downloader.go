@@ -108,7 +108,7 @@ func DownloadChapterImages(chapterID string, quality string) error {
 	pageURLs := GetPageURLs(pagesResponse, quality)
 	pageFileNames := GetPageFileNames(pagesResponse, quality)
 	successCount := 0
-	
+
 	for i, pageURL := range pageURLs {
 		pageNumber := i + 1
 		// Extract file extension from original filename
@@ -128,7 +128,7 @@ func DownloadChapterImages(chapterID string, quality string) error {
 			LocalPath:  localPath,
 			Downloaded: false,
 		}
-		
+
 		if err := database.SaveChapterPage(page); err != nil {
 			utils.Logger.Error("Failed to save page record", zap.Error(err), zap.Int("page", pageNumber))
 		}
@@ -149,8 +149,8 @@ func DownloadChapterImages(chapterID string, quality string) error {
 		}
 
 		successCount++
-		utils.Logger.Info("Downloaded page", 
-			zap.Int("page", pageNumber), 
+		utils.Logger.Info("Downloaded page",
+			zap.Int("page", pageNumber),
 			zap.Int("total", len(pageURLs)),
 			zap.String("path", localPath))
 
@@ -163,12 +163,12 @@ func DownloadChapterImages(chapterID string, quality string) error {
 		if err := database.UpdateChapterDownloadStatus(dbChapter.ID, true); err != nil {
 			utils.Logger.Error("Failed to mark chapter as downloaded", zap.Error(err))
 		} else {
-			utils.Logger.Info("Chapter fully downloaded", 
+			utils.Logger.Info("Chapter fully downloaded",
 				zap.String("chapterId", chapterID),
 				zap.Int("pages", successCount))
 		}
 	} else {
-		utils.Logger.Warn("Chapter partially downloaded", 
+		utils.Logger.Warn("Chapter partially downloaded",
 			zap.String("chapterId", chapterID),
 			zap.Int("success", successCount),
 			zap.Int("total", len(pageURLs)))
@@ -212,7 +212,7 @@ func DownloadCoverImage(mangaID string, quality string) error {
 		return fmt.Errorf("failed to download cover: %w", err)
 	}
 
-	utils.Logger.Info("Cover downloaded successfully", 
+	utils.Logger.Info("Cover downloaded successfully",
 		zap.String("mangaId", mangaID),
 		zap.String("path", localPath))
 
@@ -323,11 +323,27 @@ func downloadImageWithRetry(url string, localPath string, maxRetries int) error 
 
 // saveMangaToDatabase converts MangaDex manga response to database model and saves it
 func saveMangaToDatabase(mangaResponse *MangaResponse) (*database.Manga, error) {
+	existingManga, err := database.GetMangaByMangaDexID(mangaResponse.Data.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check existing manga before saving: %w", err)
+	}
+
 	manga := &database.Manga{
 		MangaDexID:  mangaResponse.Data.ID,
 		Title:       getPreferredTitle(mangaResponse.Data.Attributes.Title),
 		Description: sql.NullString{String: getPreferredDescription(mangaResponse.Data.Attributes.Description), Valid: true},
 		Status:      mangaResponse.Data.Attributes.Status,
+	}
+	if coverFileName := GetCoverFileName(mangaResponse.Data.Relationships); coverFileName != "" {
+		manga.CoverFileName = sql.NullString{String: coverFileName, Valid: true}
+	}
+	if existingManga != nil {
+		// A title may already have a local cover download. Metadata refreshes must
+		// retain that path rather than clearing the cached image.
+		manga.CoverImagePath = existingManga.CoverImagePath
+		if !manga.CoverFileName.Valid {
+			manga.CoverFileName = existingManga.CoverFileName
+		}
 	}
 
 	// Extract tags
@@ -435,6 +451,12 @@ func SaveMangaToDBIfNotExists(mangaID string, mangaResponse *MangaResponse) erro
 	return nil
 }
 
+// SaveMangaToDB persists the supplied MangaDex response and returns its local
+// database record. It is used when a user deliberately saves a title.
+func SaveMangaToDB(mangaResponse *MangaResponse) (*database.Manga, error) {
+	return saveMangaToDatabase(mangaResponse)
+}
+
 // ChapterPagesResult holds the result of downloading chapter pages
 type ChapterPagesResult struct {
 	MangaID    string
@@ -444,14 +466,14 @@ type ChapterPagesResult struct {
 
 // PageDownloadEvent is emitted for each page as it becomes available.
 type PageDownloadEvent struct {
-	PageNumber  int
-	TotalPages  int
-	LocalPath   string
-	PublicURL   string
-	Downloaded  bool
-	Error       string
-	MangaID     string
-	ChapterID   string
+	PageNumber int
+	TotalPages int
+	LocalPath  string
+	PublicURL  string
+	Downloaded bool
+	Error      string
+	MangaID    string
+	ChapterID  string
 }
 
 // ProgressiveDownloadResult holds aggregate info for a progressive download.
@@ -460,6 +482,7 @@ type ProgressiveDownloadResult struct {
 	ChapterID    string
 	TotalPages   int
 	SuccessCount int
+	StartPage    int
 }
 
 // DownloadAndGetChapterPages downloads chapter images and returns local paths
@@ -533,7 +556,7 @@ func DownloadAndGetChapterPages(chapterID string, quality string) (*ChapterPages
 		}
 	}
 
-	utils.Logger.Info("Chapter pages ready", 
+	utils.Logger.Info("Chapter pages ready",
 		zap.String("chapterId", chapterID),
 		zap.Int("pages", len(localPaths)))
 
@@ -545,7 +568,7 @@ func DownloadAndGetChapterPages(chapterID string, quality string) (*ChapterPages
 }
 
 // DownloadChapterPagesProgressively downloads chapter pages and emits each page as soon as it is ready.
-func DownloadChapterPagesProgressively(chapterID string, quality string, onPageReady func(event PageDownloadEvent) error) (*ProgressiveDownloadResult, error) {
+func DownloadChapterPagesProgressively(chapterID string, quality string, startPage int, onStart func(totalPages, startPage int) error, onPageReady func(event PageDownloadEvent) error) (*ProgressiveDownloadResult, error) {
 	utils.Logger.Info("Progressive chapter download started", zap.String("chapterId", chapterID))
 
 	pagesResponse, err := GetChapterPages(chapterID)
@@ -577,9 +600,35 @@ func DownloadChapterPagesProgressively(chapterID string, quality string, onPageR
 
 	pageURLs := GetPageURLs(pagesResponse, quality)
 	pageFileNames := GetPageFileNames(pagesResponse, quality)
-	successCount := 0
+	if len(pageURLs) == 0 {
+		return nil, fmt.Errorf("chapter has no pages")
+	}
 
-	for i, pageURL := range pageURLs {
+	if startPage < 1 {
+		startPage = 1
+	}
+	if startPage > len(pageURLs) {
+		startPage = len(pageURLs)
+	}
+
+	if onStart != nil {
+		if err := onStart(len(pageURLs), startPage); err != nil {
+			return nil, fmt.Errorf("stream start callback failed: %w", err)
+		}
+	}
+
+	successCount := 0
+	pageIndexes := make([]int, 0, len(pageURLs))
+	for i := startPage - 1; i < len(pageURLs); i++ {
+		pageIndexes = append(pageIndexes, i)
+	}
+	forwardPageCount := len(pageIndexes)
+	for i := startPage - 2; i >= 0; i-- {
+		pageIndexes = append(pageIndexes, i)
+	}
+
+	for streamIndex, i := range pageIndexes {
+		pageURL := pageURLs[i]
 		pageNumber := i + 1
 		// Extract file extension from original filename
 		originalFileName := pageFileNames[i]
@@ -623,8 +672,12 @@ func DownloadChapterPagesProgressively(chapterID string, quality string, onPageR
 			}
 		}
 
-		if i < len(pageURLs)-1 {
-			time.Sleep(200 * time.Millisecond)
+		if streamIndex < len(pageIndexes)-1 {
+			delay := 200 * time.Millisecond
+			if streamIndex >= forwardPageCount {
+				delay = 400 * time.Millisecond
+			}
+			time.Sleep(delay)
 		}
 	}
 
@@ -633,6 +686,7 @@ func DownloadChapterPagesProgressively(chapterID string, quality string, onPageR
 		ChapterID:    chapterID,
 		TotalPages:   len(pageURLs),
 		SuccessCount: successCount,
+		StartPage:    startPage,
 	}, nil
 }
 
@@ -643,12 +697,12 @@ func sanitizeFileName(name string) string {
 	for i := 0; i < len(replacer); i += 2 {
 		name = replaceAll(name, replacer[i], replacer[i+1])
 	}
-	
+
 	// Limit length
 	if len(name) > 100 {
 		name = name[:100]
 	}
-	
+
 	return name
 }
 
@@ -663,4 +717,3 @@ func replaceAll(s, old, new string) string {
 	}
 	return result
 }
-

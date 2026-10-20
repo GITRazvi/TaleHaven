@@ -127,6 +127,21 @@ func RunMigrations() {
 	CREATE INDEX IF NOT EXISTS idx_reading_progress_last_read ON user_reading_progress(last_read_at);
 	`
 
+	// Create a per-user library. Manga metadata remains shared, while this table
+	// records which titles a particular user chose to save.
+	createUserLibraryTable := `
+	CREATE TABLE IF NOT EXISTS user_library_manga (
+		user_id INTEGER NOT NULL,
+		manga_id INTEGER NOT NULL,
+		added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (user_id, manga_id),
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+		FOREIGN KEY (manga_id) REFERENCES manga(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_user_library_manga_user_added
+		ON user_library_manga(user_id, added_at DESC);
+	`
+
 	// Execute migrations
 	migrations := []struct {
 		name  string
@@ -138,6 +153,7 @@ func RunMigrations() {
 		{"chapters_table", createChaptersTable},
 		{"chapter_pages_table", createChapterPagesTable},
 		{"reading_progress_table", createReadingProgressTable},
+		{"user_library_manga_table", createUserLibraryTable},
 	}
 
 	for _, migration := range migrations {
@@ -153,4 +169,3 @@ func RunMigrations() {
 
 	utils.Logger.Info("All database migrations completed successfully")
 }
-
