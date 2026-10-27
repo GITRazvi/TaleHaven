@@ -19,9 +19,9 @@ info:
     - Supports multi-device sync
     
     **v2.0.0 - Authentication Update:**
-    - JWT authentication with HTTP-only cookies
-    - JWT tokens stored in `talehaven_auth_token` cookie
-    - Tokens valid for 30 days
+    - Revocable server-side sessions with HTTP-only cookies
+    - Opaque credentials stored in `talehaven_session`; the browser never sees user data in the cookie
+    - 30-minute idle timeout and 14-day absolute lifetime
     - Include credentials in all requests: `fetch(url, { credentials: 'include' })`
     
     **Cover Image URLs:**
@@ -35,18 +35,18 @@ servers:
   - url: http://localhost:3001
 
 security:
-  - JWTCookie: []
+  - SessionCookie: []
 
 components:
   securitySchemes:
-    JWTCookie:
+    SessionCookie:
       type: apiKey
       in: cookie
-      name: talehaven_auth_token
+      name: talehaven_session
       description: |
-        JWT token authentication via HTTP-only cookie.
+        Revocable opaque session authentication via HTTP-only cookie.
         - Automatically set on login/register
-        - Valid for 30 days
+        - Idle expiry: 30 minutes; absolute expiry: 14 days
         - Include credentials in requests: `fetch(url, { credentials: 'include' })`
         - Token format: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
@@ -71,8 +71,8 @@ paths:
     post:
       summary: Register a new user account
       description: |
-        Creates a new user account and returns a JWT token in an HTTP-only cookie.
-        The JWT token is automatically set and valid for 30 days.
+        Creates a new user account and returns an opaque server-side session in
+        an HTTP-only cookie.
       security: []
       requestBody:
         required: true
@@ -95,13 +95,13 @@ paths:
               password: SecurePassword123!
       responses:
         '201':
-          description: User created successfully, JWT token set in cookie
+          description: User created successfully, session cookie set
           headers:
             Set-Cookie:
-              description: JWT authentication token (HTTP-only, 30 days)
+              description: Opaque session credential (HTTP-only, 14-day maximum)
               schema:
                 type: string
-                example: talehaven_auth_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...; Path=/; HttpOnly; Max-Age=2592000
+                example: talehaven_session=lookupId.verifier; Path=/; HttpOnly; SameSite=Lax; Max-Age=1209600
           content:
             application/json:
               example:
@@ -129,8 +129,8 @@ paths:
     post:
       summary: Login with email and password
       description: |
-        Authenticates user and returns a JWT token in an HTTP-only cookie.
-        The JWT token is automatically set and valid for 30 days.
+        Authenticates user and returns an opaque, revocable server-side session
+        in an HTTP-only cookie.
       security: []
       requestBody:
         required: true
@@ -152,13 +152,13 @@ paths:
               password: SecurePassword123!
       responses:
         '200':
-          description: Login successful, JWT token set in cookie
+          description: Login successful, session cookie set
           headers:
             Set-Cookie:
-              description: JWT authentication token (HTTP-only, 30 days)
+              description: Opaque session credential (HTTP-only, 14-day maximum)
               schema:
                 type: string
-                example: talehaven_auth_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...; Path=/; HttpOnly; Max-Age=2592000
+                example: talehaven_session=lookupId.verifier; Path=/; HttpOnly; SameSite=Lax; Max-Age=1209600
           content:
             application/json:
               example:
@@ -185,17 +185,17 @@ paths:
   /auth/logout:
     post:
       summary: Logout current user
-      description: Clears the JWT authentication cookie
+      description: Revokes the server-side session and clears its authentication cookie
       security: []
       responses:
         '200':
-          description: Logout successful, JWT cookie cleared
+          description: Logout successful, session revoked and cookie cleared
           headers:
             Set-Cookie:
-              description: JWT cookie cleared
+              description: Session cookie cleared
               schema:
                 type: string
-                example: talehaven_auth_token=; Path=/; HttpOnly; Max-Age=-1
+                example: talehaven_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=-1
           content:
             application/json:
               example:
@@ -204,7 +204,7 @@ paths:
   /auth/me:
     get:
       summary: Get current authenticated user information
-      description: Requires valid JWT token in cookie. User info is decoded from the JWT token.
+      description: Requires a valid, non-revoked server-side session cookie.
       responses:
         '200':
           description: User information retrieved
@@ -221,25 +221,25 @@ paths:
             application/json:
               examples:
                 noToken:
-                  summary: No JWT token found
+                  summary: No session cookie found
                   value:
                     error: Authentication required
                     message: You must be logged in to access this resource
                 expiredToken:
-                  summary: Token expired
+                  summary: Session expired
                   value:
-                    error: Token expired
+                    error: Session expired
                     message: Your session has expired. Please log in again
                 invalidToken:
-                  summary: Invalid token
+                  summary: Invalid session
                   value:
-                    error: Invalid token
+                    error: Invalid session
                     message: Your session is invalid. Please log in again
 
   /auth/password:
     put:
       summary: Change password for authenticated user
-      description: Requires valid JWT token. User is identified from the JWT token.
+      description: Requires a valid server-side session. User identity is loaded from the session record.
       requestBody:
         required: true
         content:
@@ -283,7 +283,7 @@ paths:
   /auth/account:
     delete:
       summary: Delete current user account
-      description: Requires valid JWT token. Permanently deletes the authenticated user's account.
+      description: Requires a valid server-side session. Permanently deletes the authenticated user's account.
       responses:
         '200':
           description: Account deleted successfully
@@ -861,7 +861,7 @@ paths:
     post:
       summary: Save or update chapter progress (Redis only - fast!)
       description: |
-        Requires authentication (JWT token).
+        Requires authentication through a server-side session.
         Writes progress to Redis cache only for instant response (~1-2ms).
         
         **Architecture:**

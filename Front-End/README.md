@@ -2,50 +2,6 @@
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
-## Optional local Manga Hook API
-
-[Manga Hook](https://github.com/kiraaziz/mangahook-api) is an external,
-scraper-based manga API that we may use as a secondary provider. TaleHaven
-currently uses MangaDex only, so starting Manga Hook does not route any
-TaleHaven traffic to it yet. This section is only for running and checking the
-server locally ahead of that integration.
-
-1. Install a current Node.js LTS release, which includes `npm`.
-2. Clone Manga Hook outside this repository and open its server directory:
-
-   ```powershell
-   git clone https://github.com/kiraaziz/mangahook-api.git C:\src\mangahook-api
-   Set-Location C:\src\mangahook-api\server
-   ```
-
-3. Install its dependencies:
-
-   ```powershell
-   npm install
-   ```
-
-4. Ensure `server/.env` contains a port that does not conflict with TaleHaven.
-   The recommended local value is `PORT=3002` (`3000` is the frontend and
-   `3001` is the TaleHaven backend).
-5. Start the server:
-
-   ```powershell
-   npm run start
-   ```
-
-6. With the server running, make a quick local request in another PowerShell
-   window:
-
-   ```powershell
-   Invoke-RestMethod http://localhost:3002/api/mangaList
-   ```
-
-Manga Hook scrapes an upstream website, so a successful local startup does not
-guarantee every request will return data. Do not expose this development server
-directly to the public internet. The eventual TaleHaven integration should call
-it from the backend, apply timeouts and rate limits, and fall back to MangaDex
-when appropriate.
-
 ## Available Scripts
 
 In the project directory, you can run:

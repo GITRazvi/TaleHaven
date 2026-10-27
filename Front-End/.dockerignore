@@ -1,0 +1,7 @@
+.git
+.idea
+node_modules
+build
+coverage
+Plan
+npm-debug.log*

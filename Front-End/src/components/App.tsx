@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, useParams } from 'react-router-dom';
+import AniListMangaDetailsPage from './manga/anilist-manga-details-page';
+import AniListGenrePage from './manga/anilist-genre-page';
 import HorizontalNavbar from './navbar/navbar';
 import MangaSearchPage from './manga/manga-search-page';
 import MangaDetailsPage from './manga/manga-details-page';
@@ -9,7 +11,12 @@ import LoginPage from './auth/login-page';
 import RegisterPage from './auth/register-page';
 import ProfilePage from './auth/profile-page';
 import ProtectedRoute from './auth/ProtectedRoute';
+import AdminRoute from './auth/AdminRoute';
 import LibraryPage from './library/library-page';
+import AdminDashboardPage from './admin/admin-dashboard-page';
+import ChatRoomsPage from './chat/chat-rooms-page';
+import ChatRoomPage from './chat/chat-room-page';
+import ChatInvitePage from './chat/chat-invite-page';
 import { AuthProvider } from '../contexts/AuthContext';
 
 // Wrapper to force remount when chapter changes
@@ -42,7 +49,29 @@ const App: React.FC = () => {
                             <LibraryPage />
                         </ProtectedRoute>
                     } />
+                    <Route path="/admin" element={
+                        <AdminRoute>
+                            <AdminDashboardPage />
+                        </AdminRoute>
+                    } />
+                    <Route path="/chat" element={
+                        <ProtectedRoute>
+                            <ChatRoomsPage />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/chat/rooms/:roomID" element={
+                        <ProtectedRoute>
+                            <ChatRoomPage />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/chat/invite/:token" element={
+                        <ProtectedRoute>
+                            <ChatInvitePage />
+                        </ProtectedRoute>
+                    } />
                     <Route path="/manga/search" element={<MangaSearchPage />} />
+                    <Route path="/anilist/manga/:anilistId" element={<AniListMangaDetailsPage />} />
+                    <Route path="/anilist/genre/:genre" element={<AniListGenrePage />} />
                     <Route path="/manga/:mangaId" element={<MangaDetailsPage />} />
                     <Route path="/manga/:mangaId/chapter/:chapterId" element={<MangaReaderWrapper />} />
                 </Routes>

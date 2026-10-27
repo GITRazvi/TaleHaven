@@ -4,9 +4,9 @@ import { useAuth } from '../../contexts/AuthContext';
 import { Container, Spinner } from 'react-bootstrap';
 
 /**
- * Protected Route Component - JWT Authentication
+ * Protected Route Component - server-side cookie sessions
  *
- * Checks for valid JWT token (stored in HTTP-only cookie)
+ * Checks the safe user state restored from an HttpOnly session cookie.
  * Redirects to login if token is missing, invalid, or expired
  */
 
@@ -15,7 +15,7 @@ interface ProtectedRouteProps {
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
-    const { user, loading } = useAuth();
+    const { user, loading, sessionExpired } = useAuth();
     const location = useLocation();
 
     if (loading) {
@@ -29,7 +29,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
     }
 
     if (!user) {
-        return <Navigate to="/login" state={{ from: location }} replace />;
+        return <Navigate to="/login" state={{ from: location, sessionExpired }} replace />;
     }
 
     return children;

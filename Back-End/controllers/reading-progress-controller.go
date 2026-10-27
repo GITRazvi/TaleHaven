@@ -28,8 +28,9 @@ func getUserID(c *gin.Context) (int, error) {
 // ReadingProgressController sets up routes for reading progress endpoints
 func ReadingProgressController(router *gin.Engine) {
 	progressRoutes := router.Group("/reading-progress")
-	// Use OptionalAuthMiddleware to support both authenticated and anonymous users
-	progressRoutes.Use(middlewares.OptionalAuthMiddleware())
+	// Reading progress is private per user and must always have a server-side
+	// authenticated session.
+	progressRoutes.Use(middlewares.AuthMiddleware())
 	{
 		// Update reading progress
 		progressRoutes.POST("", updateReadingProgress) // POST /reading-progress
@@ -456,7 +457,6 @@ func deleteAllProgress(c *gin.Context) {
 		})
 		return
 	}
-
 
 	c.JSON(http.StatusOK, gin.H{
 		"result":  "ok",

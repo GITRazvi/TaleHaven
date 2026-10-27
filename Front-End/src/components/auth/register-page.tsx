@@ -36,7 +36,6 @@ const RegisterPage: React.FC = () => {
             await register(email, password);
             navigate('/');
         } catch (err: any) {
-            // Handle JWT authentication errors
             const errorMessage = err?.details?.message || err?.message || 'Failed to create account. Please try again.';
             setError(errorMessage);
         } finally {

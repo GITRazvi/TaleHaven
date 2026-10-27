@@ -7,6 +7,12 @@ CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
+	role VARCHAR(32) NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+	display_name VARCHAR(80) NOT NULL DEFAULT '',
+	profile_image_path VARCHAR(512) NOT NULL DEFAULT '',
+	display_theme VARCHAR(24) NOT NULL DEFAULT 'midnight',
+	custom_theme_color VARCHAR(7) NOT NULL DEFAULT '',
+	theme_image_path VARCHAR(512) NOT NULL DEFAULT '',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -15,11 +21,15 @@ CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 -- Sessions Table
 -- Stores user sessions for tracking and authentication
 CREATE TABLE IF NOT EXISTS sessions (
-    id VARCHAR(64) PRIMARY KEY,  -- Secure random session ID
-    user_id INTEGER,  -- NULL for anonymous sessions, FK for logged-in users
+    id VARCHAR(64) PRIMARY KEY,  -- Public random lookup identifier
+    verifier_hash VARCHAR(64),  -- SHA-256 verifier; raw browser secret is never stored
+    user_id INTEGER,  -- Authenticated user, FK to users
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP NOT NULL,
     last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+	idle_expires_at TIMESTAMP,
+	absolute_expires_at TIMESTAMP,
+	revoked_at TIMESTAMP,
     ip_address VARCHAR(45),  -- IPv4 or IPv6
     user_agent TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

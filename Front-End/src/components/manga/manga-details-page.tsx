@@ -1,13 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, ListGroup, Spinner } from 'react-bootstrap';
+import { Button, Form, ListGroup, Spinner } from 'react-bootstrap';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import Backend from '../../app/clients/backend/backend';
+import { ScanlationGroupOption } from '../../app/clients/backend/types';
 import { useAuth } from '../../contexts/AuthContext';
 
 type MangaChapterItem = {
   id: string;
   number: string;
   title: string;
+  language: string;
+  scanlationGroup: string;
 };
 
 type MangaView = {
@@ -17,6 +20,11 @@ type MangaView = {
 };
 
 const MANUAL_COMPLETION_PAGE = 2147483647;
+
+const languageLabel = (language: string) => {
+  const labels: Record<string, string> = { en: 'English', ro: 'Romanian', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian', ja: 'Japanese', ko: 'Korean', zh: 'Chinese', 'pt-br': 'Portuguese (Brazil)' };
+  return labels[language] || language;
+};
 
 const readLocalizedValue = (value: unknown): string => {
   if (typeof value === 'string') {
@@ -69,11 +77,15 @@ const mapChapter = (input: unknown): MangaChapterItem | null => {
   // Backend may return flat data or nested attributes
   const chapter = data.chapter ?? (data.attributes as Record<string, unknown> | undefined)?.chapter;
   const title = data.title ?? (data.attributes as Record<string, unknown> | undefined)?.title;
+  const language = data.translatedLanguage ?? (data.attributes as Record<string, unknown> | undefined)?.translatedLanguage;
+  const scanlationGroup = data.scanlationGroup ?? '';
 
   return {
     id,
     number: String(chapter ?? '?'),
     title: (typeof title === 'string' && title) || 'Untitled chapter',
+    language: typeof language === 'string' ? language : '',
+    scanlationGroup: typeof scanlationGroup === 'string' ? scanlationGroup : '',
   };
 };
 
@@ -99,6 +111,83 @@ const MangaDetailsPage: React.FC = () => {
   const [libraryError, setLibraryError] = useState<string>('');
   const [isInLibrary, setIsInLibrary] = useState<boolean>(false);
   const [isLibraryLoading, setIsLibraryLoading] = useState<boolean>(false);
+  const [isFavorite, setIsFavorite] = useState<boolean>(false);
+  const [isFavoriteLoading, setIsFavoriteLoading] = useState<boolean>(false);
+  const [selectedLanguage, setSelectedLanguage] = useState('all');
+  const [selectedScanlationGroup, setSelectedScanlationGroup] = useState('all');
+  const [availableLanguages, setAvailableLanguages] = useState<string[]>([]);
+  const [scanlationGroups, setScanlationGroups] = useState<ScanlationGroupOption[]>([]);
+  const [filtersLoaded, setFiltersLoaded] = useState(false);
+  const [scanlationPreferenceError, setScanlationPreferenceError] = useState('');
+
+  useEffect(() => {
+    setFiltersLoaded(false);
+    if (!user) {
+      setSelectedLanguage('all');
+      setSelectedScanlationGroup('all');
+      setFiltersLoaded(true);
+      return;
+    }
+    let isCurrent = true;
+    const loadPreferences = async () => {
+      let language = 'all';
+      let scanlationGroup = 'all';
+      try {
+        const response = await backend.getReadingSettings();
+        language = response.preferredTranslationLanguage || 'all';
+        if (language !== 'all' && mangaId) {
+          const preference = await backend.getPreferredScanlationGroup(mangaId, language);
+          scanlationGroup = preference.scanlationGroup || 'all';
+        }
+      } catch {
+        // Chapter filtering remains available with the All groups fallback.
+      }
+      if (isCurrent) {
+        setSelectedLanguage(language);
+        setSelectedScanlationGroup(scanlationGroup);
+        setFiltersLoaded(true);
+      }
+    };
+    void loadPreferences();
+    return () => { isCurrent = false; };
+  }, [backend, mangaId, user]);
+
+  const changeLanguage = async (language: string) => {
+    setFiltersLoaded(false);
+    setScanlationPreferenceError('');
+    let scanlationGroup = 'all';
+    if (user && language !== 'all') {
+      try {
+        const preference = await backend.getPreferredScanlationGroup(mangaId, language);
+        scanlationGroup = preference.scanlationGroup || 'all';
+      } catch {
+        setScanlationPreferenceError('Unable to restore your saved scanlation group. Showing all groups.');
+      }
+    }
+    setSelectedLanguage(language);
+    setSelectedScanlationGroup(scanlationGroup);
+    setFiltersLoaded(true);
+  };
+
+  const changeScanlationGroup = async (scanlationGroup: string) => {
+    const previousGroup = selectedScanlationGroup;
+    setFiltersLoaded(false);
+    setScanlationPreferenceError('');
+    if (!user) {
+      setSelectedScanlationGroup(scanlationGroup);
+      setFiltersLoaded(true);
+      return;
+    }
+    try {
+      await backend.updatePreferredScanlationGroup(mangaId, { language: selectedLanguage, scanlationGroup });
+      setSelectedScanlationGroup(scanlationGroup);
+    } catch {
+      setSelectedScanlationGroup(previousGroup);
+      setScanlationPreferenceError('Unable to save your scanlation-group preference.');
+    } finally {
+      setFiltersLoaded(true);
+    }
+  };
 
   const handleLibraryToggle = async () => {
     if (!user) {
@@ -112,6 +201,7 @@ const MangaDetailsPage: React.FC = () => {
       if (isInLibrary) {
         await backend.removeMangaFromMyLibrary(mangaId);
         setIsInLibrary(false);
+        setIsFavorite(false);
       } else {
         await backend.addMangaToMyLibrary(mangaId);
         setIsInLibrary(true);
@@ -123,11 +213,32 @@ const MangaDetailsPage: React.FC = () => {
     }
   };
 
+  const handleFavoriteToggle = async () => {
+    if (!isInLibrary) return;
+    if (!user) { navigate('/login'); return; }
+    setLibraryError('');
+    setIsFavoriteLoading(true);
+    try {
+      if (isFavorite) {
+        await backend.removeMangaFromFavorites(mangaId);
+        setIsFavorite(false);
+      } else {
+        await backend.addMangaToFavorites(mangaId);
+        setIsFavorite(true);
+      }
+    } catch (err) {
+      setLibraryError((err as Error).message || 'Unable to update your favorites.');
+    } finally {
+      setIsFavoriteLoading(false);
+    }
+  };
+
   useEffect(() => {
     let isCurrent = true;
 
     if (!user || !mangaId) {
       setIsInLibrary(false);
+      setIsFavorite(false);
       return () => {
         isCurrent = false;
       };
@@ -136,15 +247,17 @@ const MangaDetailsPage: React.FC = () => {
     const loadLibraryMembership = async () => {
       setIsLibraryLoading(true);
       try {
-        const response = await backend.getMyLibrary();
+        const [libraryResponse, favoriteResponse] = await Promise.all([backend.getMyLibrary(), backend.getMangaDexFavoriteIDs()]);
         if (isCurrent) {
-          setIsInLibrary(response.data.some((libraryManga) => libraryManga.mangaId === mangaId));
+          setIsInLibrary(libraryResponse.data.some((libraryManga) => libraryManga.mangaId === mangaId));
+          setIsFavorite(favoriteResponse.data.includes(mangaId));
         }
       } catch {
         // Keep the heart hollow when membership cannot be determined. The
         // toggle itself will still display a useful API error if it fails.
         if (isCurrent) {
           setIsInLibrary(false);
+          setIsFavorite(false);
         }
       } finally {
         if (isCurrent) {
@@ -161,6 +274,7 @@ const MangaDetailsPage: React.FC = () => {
 
   useEffect(() => {
     const loadData = async () => {
+      if (!filtersLoaded) return;
       if (!mangaId) {
         setError('Missing manga id.');
         setIsLoading(false);
@@ -179,7 +293,7 @@ const MangaDetailsPage: React.FC = () => {
 
         const [mangaResponse, firstChaptersResponse, coverResponse, progressResponse] = await Promise.all([
           backend.getManga(mangaId),
-          backend.getMangaChapters(mangaId, { limit: 100, offset: 0, translatedLanguage: ['en'] }),
+          backend.getMangaChapters(mangaId, { limit: 100, offset: 0, language: selectedLanguage, scanlationGroup: selectedScanlationGroup }),
           backend.getMangaCover(mangaId, '512').catch((err) => {
             console.warn('[MangaDetails] Cover fetch failed:', err);
             return { result: 'ok', coverUrl: '' };
@@ -195,7 +309,8 @@ const MangaDetailsPage: React.FC = () => {
           const nextResponse = await backend.getMangaChapters(mangaId, {
             limit: 100,
             offset,
-            translatedLanguage: ['en'],
+            language: selectedLanguage,
+            scanlationGroup: selectedScanlationGroup,
           });
           chapterResponses.push(nextResponse);
 
@@ -219,7 +334,10 @@ const MangaDetailsPage: React.FC = () => {
         );
         const savedPages = Object.entries(progressResponse?.data?.chapters ?? {}).reduce<Record<string, number>>(
           (progressByChapter, [chapterId, progress]) => {
-            progressByChapter[chapterId] = progress.currentPage;
+            const isComplete = Boolean(progress.totalPages) && progress.currentPage >= (progress.totalPages ?? 0);
+            if (!isComplete) {
+              progressByChapter[chapterId] = progress.currentPage;
+            }
             return progressByChapter;
           },
           {}
@@ -243,6 +361,8 @@ const MangaDetailsPage: React.FC = () => {
         setChapterProgressPages(savedPages);
         setResumeChapterId(latestProgress?.chapterId ?? null);
         setCoverUrl(coverResponse.coverUrl || '');
+        setAvailableLanguages(firstChaptersResponse.availableLanguages || []);
+        setScanlationGroups(firstChaptersResponse.scanlationGroups || []);
       } catch (err) {
         console.error('[MangaDetails] Error loading data:', err);
         setError((err as Error).message || 'Failed to load manga details.');
@@ -252,7 +372,7 @@ const MangaDetailsPage: React.FC = () => {
     };
 
     loadData();
-  }, [backend, mangaId]);
+  }, [backend, filtersLoaded, mangaId, selectedLanguage, selectedScanlationGroup, user]);
 
   if (isLoading) {
     return (
@@ -272,6 +392,14 @@ const MangaDetailsPage: React.FC = () => {
   }
 
   const chapterIds = chapters.map((chapter) => chapter.id);
+  const chapterNavigationState = {
+    chapterIds,
+    chapterNavigation: chapters.map((chapter) => ({ id: chapter.id, number: chapter.number })),
+    chapterFilters: { language: selectedLanguage, scanlationGroup: selectedScanlationGroup },
+  };
+  const displayedScanlationGroups = selectedScanlationGroup !== 'all' && !scanlationGroups.some((group) => group.id === selectedScanlationGroup)
+    ? [{ id: selectedScanlationGroup, name: 'Saved group (no chapters currently available)', chapterCount: 0 }, ...scanlationGroups]
+    : scanlationGroups;
   const handleReadFromChapterOne = () => {
     const firstChapter = chapters.find((chapter) => chapter.number === '1') ?? chapters[0];
     if (!firstChapter) {
@@ -279,7 +407,7 @@ const MangaDetailsPage: React.FC = () => {
     }
 
     navigate(`/manga/${mangaId}/chapter/${firstChapter.id}`, {
-      state: { chapterIds, startAtPage: 1 },
+      state: { ...chapterNavigationState, startAtPage: 1 },
     });
   };
   const handleContinueReading = () => {
@@ -290,7 +418,7 @@ const MangaDetailsPage: React.FC = () => {
     }
 
     navigate(`/manga/${mangaId}/chapter/${chapterId}`, {
-      state: chapterIds.includes(chapterId) ? { chapterIds } : undefined,
+      state: chapterIds.includes(chapterId) ? chapterNavigationState : undefined,
     });
   };
   const toggleChapterSelection = (chapterId: string) => {
@@ -349,11 +477,9 @@ const MangaDetailsPage: React.FC = () => {
       setChapterProgressPages((previous) => {
         const next = { ...previous };
         updatedChapterIds.forEach((chapterId) => {
-          if (action === 'read') {
-            next[chapterId] = MANUAL_COMPLETION_PAGE;
-          } else {
-            delete next[chapterId];
-          }
+          // The manual-completion sentinel is not a real page and must never
+          // appear in the “Last read” label.
+          delete next[chapterId];
         });
         return next;
       });
@@ -380,15 +506,26 @@ const MangaDetailsPage: React.FC = () => {
         <div className="d-flex gap-2">
           <button
             type="button"
-            className={`library-heart ${isInLibrary ? 'is-saved' : ''}`}
+            className="library-toggle"
             onClick={handleLibraryToggle}
             disabled={isLibraryLoading}
             aria-label={isInLibrary ? 'Remove from My Library' : user ? 'Add to My Library' : 'Log in to save to My Library'}
             aria-pressed={isInLibrary}
             title={isInLibrary ? 'Remove from My Library' : user ? 'Add to My Library' : 'Log in to save'}
           >
-            {isLibraryLoading ? '…' : isInLibrary ? '♥' : '♡'}
+            {isLibraryLoading ? '…' : isInLibrary ? '−' : '+'}
           </button>
+          {isInLibrary && <button
+            type="button"
+            className={`library-heart ${isFavorite ? 'is-saved' : ''}`}
+            onClick={handleFavoriteToggle}
+            disabled={isFavoriteLoading}
+            aria-label={isFavorite ? 'Remove from Favorites' : user ? 'Add to Favorites' : 'Log in to favorite'}
+            aria-pressed={isFavorite}
+            title={isFavorite ? 'Remove from Favorites' : user ? 'Add to Favorites' : 'Log in to favorite'}
+          >
+            {isFavoriteLoading ? '…' : isFavorite ? '♥' : '♡'}
+          </button>}
           <Button variant="outline-secondary" size="sm" onClick={() => navigate(-1)}>
             ← Back
           </Button>
@@ -414,6 +551,36 @@ const MangaDetailsPage: React.FC = () => {
       <p>{manga?.description}</p>
 
       <h4>Chapters</h4>
+      <div className="d-flex flex-wrap gap-2 align-items-end mb-3" aria-label="Chapter filters">
+        <Form.Group>
+          <Form.Label className="small mb-1" htmlFor="chapter-language">Language</Form.Label>
+          <Form.Select
+            id="chapter-language"
+            aria-label="Chapter language"
+            value={selectedLanguage}
+            disabled={!filtersLoaded}
+            onChange={(event) => void changeLanguage(event.target.value)}
+          >
+            <option value="all">All languages</option>
+            {availableLanguages.map((language) => <option key={language} value={language}>{languageLabel(language)}</option>)}
+          </Form.Select>
+        </Form.Group>
+        <Form.Group>
+          <Form.Label className="small mb-1" htmlFor="chapter-scanlation-group">Scanlation group</Form.Label>
+          <Form.Select
+            id="chapter-scanlation-group"
+            aria-label="Scanlation group"
+            value={selectedScanlationGroup}
+            disabled={selectedLanguage === 'all' || !filtersLoaded}
+            onChange={(event) => void changeScanlationGroup(event.target.value)}
+          >
+            <option value="all">All groups</option>
+            {displayedScanlationGroups.map((group) => <option key={group.id} value={group.id}>{group.name} — {group.chapterCount} chapters</option>)}
+          </Form.Select>
+        </Form.Group>
+        {selectedLanguage === 'all' && <span className="small text-muted">Choose one language to filter by scanlation group.</span>}
+        {scanlationPreferenceError && <span className="small text-danger">{scanlationPreferenceError}</span>}
+      </div>
       <div className="d-flex gap-2 mb-3">
         <Button variant="primary" onClick={handleContinueReading} disabled={chapters.length === 0}>
           Continue reading
@@ -461,7 +628,7 @@ const MangaDetailsPage: React.FC = () => {
             {chapters.map((chapter) => {
               const isCompleted = completedChapterIds.has(chapter.id);
               const savedPage = chapterProgressPages[chapter.id];
-              const showSavedPage = typeof savedPage === 'number' && savedPage > 0 && savedPage < MANUAL_COMPLETION_PAGE;
+              const showSavedPage = typeof savedPage === 'number' && savedPage > 0;
               return (
                 <ListGroup.Item key={chapter.id} className="p-0">
                   {isSelectionMode ? (
@@ -473,17 +640,17 @@ const MangaDetailsPage: React.FC = () => {
                       aria-pressed={selectedChapterIds.has(chapter.id)}
                       aria-label={`Select chapter ${chapter.number}: ${chapter.title}${isCompleted ? ', read' : ''}`}
                     >
-                      <span>Chapter {chapter.number} - {chapter.title}</span>
+                      <span>Chapter {chapter.number} - {chapter.title} {selectedLanguage === 'all' && chapter.language ? `(${languageLabel(chapter.language)})` : ''}</span>
                       {showSavedPage && <span className="chapter-progress">Last read: Page {savedPage}</span>}
                     </button>
                   ) : (
                     <Link
                       to={`/manga/${mangaId}/chapter/${chapter.id}`}
-                      state={{ chapterIds }}
+                      state={chapterNavigationState}
                       className={`text-decoration-none chapter-link p-3 d-flex justify-content-between align-items-center gap-3 ${isCompleted ? 'chapter-read' : ''}`}
                       aria-label={`Chapter ${chapter.number}: ${chapter.title}${isCompleted ? ', read' : ''}`}
                     >
-                      <span>Chapter {chapter.number} - {chapter.title}</span>
+                      <span>Chapter {chapter.number} - {chapter.title} {selectedLanguage === 'all' && chapter.language ? `(${languageLabel(chapter.language)})` : ''}</span>
                       {showSavedPage && <span className="chapter-progress">Last read: Page {savedPage}</span>}
                     </Link>
                   )}

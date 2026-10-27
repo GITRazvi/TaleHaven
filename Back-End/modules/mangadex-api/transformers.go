@@ -1,10 +1,9 @@
 package mangadex_api
 
-
 // TransformToSimpleManga converts MangaData to a simplified format
 func TransformToSimpleManga(manga MangaData) SimpleManga {
-	// Extract title (prefer English, fallback to first available)
-	title := getPreferredTitle(manga.Attributes.Title)
+	// Extract title (prefer an English primary or alternative title).
+	title := GetPreferredMangaTitle(manga)
 
 	// Extract description (prefer English)
 	description := getPreferredDescription(manga.Attributes.Description)
@@ -46,18 +45,19 @@ func TransformToSimpleManga(manga MangaData) SimpleManga {
 	}
 
 	return SimpleManga{
-		ID:           manga.ID,
-		Title:        title,
-		Description:  description,
-		CoverUrl:     coverUrl,
-		Author:       author,
-		Artist:       artist,
-		Status:       manga.Attributes.Status,
-		Year:         manga.Attributes.Year,
-		Tags:         tags,
-		Rating:       manga.Attributes.ContentRating,
-		LastChapter:  manga.Attributes.LastChapter,
-		Languages:    manga.Attributes.AvailableTranslatedLanguages,
+		ID:                manga.ID,
+		Title:             title,
+		AlternativeTitles: MangaAlternativeTitles(manga, title),
+		Description:       description,
+		CoverUrl:          coverUrl,
+		Author:            author,
+		Artist:            artist,
+		Status:            manga.Attributes.Status,
+		Year:              manga.Attributes.Year,
+		Tags:              tags,
+		Rating:            manga.Attributes.ContentRating,
+		LastChapter:       manga.Attributes.LastChapter,
+		Languages:         manga.Attributes.AvailableTranslatedLanguages,
 	}
 }
 
@@ -65,12 +65,14 @@ func TransformToSimpleManga(manga MangaData) SimpleManga {
 func TransformToSimpleChapter(chapter ChapterData) SimpleChapter {
 	mangaID := ""
 	scanlationGroup := ""
+	scanlationGroupID := ""
 
 	for _, rel := range chapter.Relationships {
 		switch rel.Type {
 		case "manga":
 			mangaID = rel.ID
 		case "scanlation_group":
+			scanlationGroupID = rel.ID
 			if name, ok := rel.Attributes["name"].(string); ok {
 				scanlationGroup = name
 			}
@@ -87,6 +89,7 @@ func TransformToSimpleChapter(chapter ChapterData) SimpleChapter {
 		Pages:              chapter.Attributes.Pages,
 		PublishAt:          chapter.Attributes.PublishAt,
 		ScanlationGroup:    scanlationGroup,
+		ScanlationGroupID:  scanlationGroupID,
 	}
 }
 
@@ -140,7 +143,7 @@ func BuildFullCoverURL(mangaID string, relationships []Relationship, quality str
 	if fileName == "" {
 		return ""
 	}
-	
+
 	// Do NOT strip extension - MangaDex expects fileName with extension
 	// Example: abc123.jpg -> abc123.jpg.512.jpg
 	return BuildCoverURL(mangaID, fileName, quality)
@@ -178,7 +181,7 @@ func GetPageFileNames(pagesResponse *ChapterPagesResponse, quality string) []str
 	} else {
 		pageFiles = pagesResponse.Chapter.Data
 	}
-	
+
 	return pageFiles
 }
 
@@ -205,4 +208,3 @@ func GroupChaptersByVolume(chapters []ChapterData) map[string][]ChapterData {
 	}
 	return grouped
 }
-

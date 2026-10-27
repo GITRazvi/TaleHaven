@@ -464,6 +464,26 @@ type ChapterPagesResult struct {
 	LocalPaths []string
 }
 
+// ChapterPageResult is one requested page for paged readers. PublicURL is
+// served by this application after the source image has been downloaded.
+type ChapterPageResult struct {
+	MangaID    string
+	ChapterID  string
+	PageNumber int
+	TotalPages int
+	PublicURL  string
+}
+
+// GetChapterPageCount returns metadata only. It deliberately never downloads
+// a chapter image, so paged readers can validate a resume position first.
+func GetChapterPageCount(chapterID, quality string) (int, error) {
+	pagesResponse, err := GetChapterPages(chapterID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get chapter pages: %w", err)
+	}
+	return len(GetPageURLs(pagesResponse, quality)), nil
+}
+
 // PageDownloadEvent is emitted for each page as it becomes available.
 type PageDownloadEvent struct {
 	PageNumber int
@@ -564,6 +584,65 @@ func DownloadAndGetChapterPages(chapterID string, quality string) (*ChapterPages
 		MangaID:    mangaID,
 		ChapterID:  chapterID,
 		LocalPaths: localPaths,
+	}, nil
+}
+
+// DownloadAndGetChapterPage downloads only one chapter page. It intentionally
+// does not enqueue adjacent pages: paged reading requests the next image only
+// after the reader advances.
+func DownloadAndGetChapterPage(chapterID string, quality string, pageNumber int) (*ChapterPageResult, error) {
+	if pageNumber < 1 {
+		return nil, fmt.Errorf("page number must be positive")
+	}
+
+	pagesResponse, err := GetChapterPages(chapterID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chapter pages: %w", err)
+	}
+	pageURLs := GetPageURLs(pagesResponse, quality)
+	pageFileNames := GetPageFileNames(pagesResponse, quality)
+	if pageNumber > len(pageURLs) || pageNumber > len(pageFileNames) {
+		return nil, fmt.Errorf("page %d is outside the chapter range", pageNumber)
+	}
+
+	chapterResponse, err := GetChapterByID(chapterID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chapter details: %w", err)
+	}
+	var mangaID string
+	for _, relationship := range chapterResponse.Data.Relationships {
+		if relationship.Type == "manga" {
+			mangaID = relationship.ID
+			break
+		}
+	}
+	if mangaID == "" {
+		return nil, fmt.Errorf("manga ID not found in chapter relationships")
+	}
+
+	chapterFolder := filepath.Join(ImagesBaseDir, MangaDir, mangaID, "chapters", chapterID)
+	if err := os.MkdirAll(chapterFolder, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create chapter folder: %w", err)
+	}
+
+	fileExt := filepath.Ext(pageFileNames[pageNumber-1])
+	if fileExt == "" {
+		fileExt = ".jpg"
+	}
+	fileName := fmt.Sprintf("%d%s", pageNumber, fileExt)
+	localPath := filepath.Join(chapterFolder, fileName)
+	if fileInfo, err := os.Stat(localPath); err != nil || fileInfo.Size() == 0 {
+		if err := downloadImageWithRetry(pageURLs[pageNumber-1], localPath, 3); err != nil {
+			return nil, fmt.Errorf("download page %d: %w", pageNumber, err)
+		}
+	}
+
+	return &ChapterPageResult{
+		MangaID:    mangaID,
+		ChapterID:  chapterID,
+		PageNumber: pageNumber,
+		TotalPages: len(pageURLs),
+		PublicURL:  path.Join("/images", MangaDir, mangaID, "chapters", chapterID, fileName),
 	}, nil
 }
 

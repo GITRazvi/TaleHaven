@@ -1,10 +1,12 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import Backend from '../app/clients/backend/backend';
 import { User } from '../app/clients/backend/types';
+import { sessionExpiredEvent } from './auth-session-events';
 
 interface AuthContextType {
     user: User | null;
     loading: boolean;
+    sessionExpired: boolean;
     login: (email: string, password: string) => Promise<void>;
     register: (email: string, password: string) => Promise<void>;
     logout: () => Promise<void>;
@@ -26,50 +28,53 @@ const backend = new Backend();
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [user, setUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
+    const [sessionExpired, setSessionExpired] = useState(false);
 
-    const refreshUser = async () => {
+    const refreshUser = useCallback(async () => {
         try {
             const response = await backend.getCurrentUser();
             setUser(response.user);
+            setSessionExpired(false);
         } catch (error) {
             setUser(null);
         }
-    };
-
-    useEffect(() => {
-        const checkAuth = async () => {
-            try {
-                await refreshUser();
-            } catch (error) {
-                console.error('Auth check failed:', error);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        checkAuth();
     }, []);
 
+    useEffect(() => {
+        const handleSessionExpired = () => {
+            setUser(null);
+            setSessionExpired(true);
+        };
+
+        window.addEventListener(sessionExpiredEvent, handleSessionExpired);
+        refreshUser().finally(() => setLoading(false));
+
+        return () => window.removeEventListener(sessionExpiredEvent, handleSessionExpired);
+    }, [refreshUser]);
+
     const login = async (email: string, password: string) => {
-        // Backend sets JWT token in HTTP-only cookie (valid for 30 days)
         const response = await backend.login({ email, password });
         setUser(response.user);
+        setSessionExpired(false);
     };
 
     const register = async (email: string, password: string) => {
-        // Backend sets JWT token in HTTP-only cookie (valid for 30 days)
         const response = await backend.register({ email, password });
         setUser(response.user);
+        setSessionExpired(false);
     };
 
     const logout = async () => {
-        // Backend clears JWT token cookie
-        await backend.logout();
-        setUser(null);
+        try {
+            await backend.logout();
+        } finally {
+            setUser(null);
+            setSessionExpired(false);
+        }
     };
 
     return (
-        <AuthContext.Provider value={{ user, loading, login, register, logout, refreshUser }}>
+        <AuthContext.Provider value={{ user, loading, sessionExpired, login, register, logout, refreshUser }}>
             {children}
         </AuthContext.Provider>
     );

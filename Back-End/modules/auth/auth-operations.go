@@ -5,6 +5,7 @@ import (
 	"TaleHaven-Backend/modules/utils"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -38,15 +39,22 @@ func CreateUser(email, password string) (*database.User, error) {
 
 	// Insert user into database
 	query := `
-		INSERT INTO users (email, password_hash, created_at)
-		VALUES ($1, $2, $3)
-		RETURNING id, email, created_at
+		INSERT INTO users (email, password_hash, display_name, created_at)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, created_at
 	`
 
 	user := &database.User{}
-	err = database.DB.QueryRow(query, email, string(hashedPassword), time.Now()).Scan(
+	displayName := strings.SplitN(email, "@", 2)[0]
+	err = database.DB.QueryRow(query, email, string(hashedPassword), displayName, time.Now()).Scan(
 		&user.ID,
 		&user.Email,
+		&user.Role,
+		&user.DisplayName,
+		&user.ProfileImagePath,
+		&user.DisplayTheme,
+		&user.CustomThemeColor,
+		&user.ThemeImagePath,
 		&user.CreatedAt,
 	)
 
@@ -62,7 +70,7 @@ func CreateUser(email, password string) (*database.User, error) {
 // GetUserByEmail retrieves a user by email
 func GetUserByEmail(email string) (*database.User, error) {
 	query := `
-		SELECT id, email, password_hash, created_at
+		SELECT id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, password_hash, created_at
 		FROM users
 		WHERE email = $1
 	`
@@ -71,6 +79,12 @@ func GetUserByEmail(email string) (*database.User, error) {
 	err := database.DB.QueryRow(query, email).Scan(
 		&user.ID,
 		&user.Email,
+		&user.Role,
+		&user.DisplayName,
+		&user.ProfileImagePath,
+		&user.DisplayTheme,
+		&user.CustomThemeColor,
+		&user.ThemeImagePath,
 		&user.PasswordHash,
 		&user.CreatedAt,
 	)
@@ -89,7 +103,7 @@ func GetUserByEmail(email string) (*database.User, error) {
 // GetUserByID retrieves a user by ID
 func GetUserByID(userID int) (*database.User, error) {
 	query := `
-		SELECT id, email, password_hash, created_at
+		SELECT id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, password_hash, created_at
 		FROM users
 		WHERE id = $1
 	`
@@ -98,6 +112,12 @@ func GetUserByID(userID int) (*database.User, error) {
 	err := database.DB.QueryRow(query, userID).Scan(
 		&user.ID,
 		&user.Email,
+		&user.Role,
+		&user.DisplayName,
+		&user.ProfileImagePath,
+		&user.DisplayTheme,
+		&user.CustomThemeColor,
+		&user.ThemeImagePath,
 		&user.PasswordHash,
 		&user.CreatedAt,
 	)
@@ -110,6 +130,81 @@ func GetUserByID(userID int) (*database.User, error) {
 		return nil, err
 	}
 
+	return user, nil
+}
+
+// UpdateUserDisplayName changes only the authenticated user's presentation
+// name and returns safe profile fields for the response.
+func UpdateUserDisplayName(userID int, displayName string) (*database.User, error) {
+	user := &database.User{}
+	err := database.DB.QueryRow(`
+		UPDATE users SET display_name = $1 WHERE id = $2
+		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, created_at
+	`, displayName, userID).Scan(
+		&user.ID, &user.Email, &user.Role, &user.DisplayName, &user.ProfileImagePath, &user.DisplayTheme, &user.CustomThemeColor, &user.ThemeImagePath, &user.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+// UpdateUserProfileImagePath records only a server-owned image path.
+func UpdateUserProfileImagePath(userID int, imagePath string) (*database.User, error) {
+	user := &database.User{}
+	err := database.DB.QueryRow(`
+		UPDATE users SET profile_image_path = $1 WHERE id = $2
+		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, created_at
+	`, imagePath, userID).Scan(
+		&user.ID, &user.Email, &user.Role, &user.DisplayName, &user.ProfileImagePath, &user.DisplayTheme, &user.CustomThemeColor, &user.ThemeImagePath, &user.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+// UpdateUserDisplayTheme records a validated, named profile palette for the
+// authenticated user's own profile presentation.
+func UpdateUserDisplayTheme(userID int, displayTheme, customThemeColor string) (*database.User, error) {
+	user := &database.User{}
+	err := database.DB.QueryRow(`
+		UPDATE users SET display_theme = $1, custom_theme_color = $2 WHERE id = $3
+		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, created_at
+	`, displayTheme, customThemeColor, userID).Scan(
+		&user.ID, &user.Email, &user.Role, &user.DisplayName, &user.ProfileImagePath, &user.DisplayTheme, &user.CustomThemeColor, &user.ThemeImagePath, &user.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+// UpdateUserThemeImagePath records only a server-generated presentation
+// background path for the authenticated user's profile.
+func UpdateUserThemeImagePath(userID int, imagePath string) (*database.User, error) {
+	user := &database.User{}
+	err := database.DB.QueryRow(`
+		UPDATE users SET theme_image_path = $1 WHERE id = $2
+		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, created_at
+	`, imagePath, userID).Scan(
+		&user.ID, &user.Email, &user.Role, &user.DisplayName, &user.ProfileImagePath, &user.DisplayTheme, &user.CustomThemeColor, &user.ThemeImagePath, &user.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
 	return user, nil
 }
 
@@ -176,4 +271,3 @@ func DeleteUser(userID int) error {
 	utils.Logger.Info("User deleted successfully", zap.Int("user_id", userID))
 	return nil
 }
-

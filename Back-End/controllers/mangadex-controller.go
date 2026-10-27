@@ -30,6 +30,8 @@ func MangaDexController(router *gin.Engine) {
 	{
 		chapterRoutes.GET("/:chapterId", getChapterByID)                  // GET /chapter/{chapterId}
 		chapterRoutes.GET("/:chapterId/pages", getChapterPages)           // GET /chapter/{chapterId}/pages
+		chapterRoutes.GET("/:chapterId/page-count", getChapterPageCount)  // GET /chapter/{chapterId}/page-count
+		chapterRoutes.GET("/:chapterId/page", getChapterPage)             // GET /chapter/{chapterId}/page?page=1
 		chapterRoutes.GET("/:chapterId/pages/stream", streamChapterPages) // GET /chapter/{chapterId}/pages/stream
 		chapterRoutes.POST("/:chapterId/download", downloadChapter)       // POST /chapter/{chapterId}/download
 	}
@@ -38,6 +40,61 @@ func MangaDexController(router *gin.Engine) {
 	// Access pattern: /images/manga/{mangaId}/chapters/{chapterId}/1.jpg
 	router.Static("/images", "./images")
 	utils.Logger.Info("Static file serving enabled for /images")
+}
+
+// getChapterPageCount exposes chapter metadata without downloading an image.
+func getChapterPageCount(c *gin.Context) {
+	chapterID := c.Param("chapterId")
+	if chapterID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing chapter ID"})
+		return
+	}
+
+	pageCount, err := mangadex_api.GetChapterPageCount(chapterID, c.DefaultQuery("quality", "data"))
+	if err != nil {
+		utils.Logger.Error("Failed to get chapter page count", zap.String("chapterId", chapterID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve chapter page count", "message": err.Error()})
+		return
+	}
+	if pageCount < 1 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No pages available for this chapter"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"result": "ok", "chapterId": chapterID, "totalPages": pageCount})
+}
+
+// getChapterPage downloads and returns one requested page for paged reader
+// modes. It never preloads the rest of the chapter.
+func getChapterPage(c *gin.Context) {
+	chapterID := c.Param("chapterId")
+	pageNumber, err := strconv.Atoi(c.Query("page"))
+	if chapterID == "" || err != nil || pageNumber < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "page must be a positive integer"})
+		return
+	}
+
+	result, err := mangadex_api.DownloadAndGetChapterPage(chapterID, c.DefaultQuery("quality", "data"), pageNumber)
+	if err != nil {
+		utils.Logger.Error("Failed to get chapter page", zap.String("chapterId", chapterID), zap.Int("page", pageNumber), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve chapter page", "message": err.Error()})
+		return
+	}
+
+	if result.MangaID != "" {
+		if err := sessions.TrackMangaAccess(result.MangaID, chapterID); err != nil {
+			utils.Logger.Warn("Failed to track manga access", zap.String("mangaId", result.MangaID), zap.Error(err))
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"result":     "ok",
+		"mangaId":    result.MangaID,
+		"chapterId":  result.ChapterID,
+		"pageNumber": result.PageNumber,
+		"totalPages": result.TotalPages,
+		"pageUrl":    result.PublicURL,
+	})
 }
 
 // getPopularManga handles popular manga requests with cover images
@@ -93,20 +150,16 @@ func getPopularManga(c *gin.Context) {
 	})
 }
 
-// searchManga handles manga search requests
-// Supports both title search and filter-only search
+// searchManga handles title and filter searches through MangaDex.
 func searchManga(c *gin.Context) {
-	title := c.Query("title") // Optional - can search by filters only
-
-	// Parse optional parameters
+	title := c.Query("title")
 	limit := parseIntQuery(c, "limit", 10)
 	offset := parseIntQuery(c, "offset", 0)
 	includedTags := c.QueryArray("includedTags[]")
 	excludedTags := c.QueryArray("excludedTags[]")
-	// Parse language filter - defaults to English
 	languages := c.QueryArray("availableLanguage[]")
 	if len(languages) == 0 {
-		languages = []string{"en"} // Default to English
+		languages = []string{"en"}
 	}
 
 	utils.Logger.Info("Searching manga",
@@ -127,13 +180,10 @@ func searchManga(c *gin.Context) {
 		return
 	}
 
-	// Transform to simplified format
-	simplifiedManga := make([]mangadex_api.SimpleManga, 0)
+	simplifiedManga := make([]mangadex_api.SimpleManga, 0, len(response.Data))
 	for _, manga := range response.Data {
 		simplified := mangadex_api.TransformToSimpleManga(manga)
-		// Build full cover URL using the proper helper function
-		coverURL := mangadex_api.BuildFullCoverURL(manga.ID, manga.Relationships, "512")
-		if coverURL != "" {
+		if coverURL := mangadex_api.BuildFullCoverURL(manga.ID, manga.Relationships, "512"); coverURL != "" {
 			simplified.CoverUrl = coverURL
 		}
 		simplifiedManga = append(simplifiedManga, simplified)
@@ -238,18 +288,26 @@ func getChapters(c *gin.Context) {
 	if offset < 0 {
 		offset = 0
 	}
-	languages := c.QueryArray("translatedLanguage[]")
-	if len(languages) == 0 {
-		languages = []string{"en"} // Default to English
+	language := c.DefaultQuery("language", "")
+	if language == "" {
+		legacyLanguages := c.QueryArray("translatedLanguage[]")
+		if len(legacyLanguages) > 0 {
+			language = legacyLanguages[0]
+		}
 	}
+	if language == "" {
+		language = "all"
+	}
+	scanlationGroup := c.DefaultQuery("scanlationGroup", "all")
 
 	utils.Logger.Info("Getting manga chapters",
 		zap.String("mangaId", mangaID),
 		zap.Int("limit", limit),
 		zap.Int("offset", offset),
-		zap.Strings("languages", languages))
+		zap.String("language", language),
+		zap.String("scanlationGroup", scanlationGroup))
 
-	response, err := mangadex_api.GetMangaChapters(mangaID, limit, offset, languages)
+	chapters, err := getAllMangaChapters(mangaID)
 	if err != nil {
 		utils.Logger.Error("Failed to get chapters", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -259,19 +317,45 @@ func getChapters(c *gin.Context) {
 		return
 	}
 
-	// Transform to simplified format
-	simplifiedChapters := make([]mangadex_api.SimpleChapter, 0)
-	for _, chapter := range response.Data {
+	selected, languages, groupOptions := mangadex_api.SelectChapters(chapters, language, scanlationGroup)
+	end := offset + limit
+	if end > len(selected) {
+		end = len(selected)
+	}
+	if offset > len(selected) {
+		offset = len(selected)
+	}
+	simplifiedChapters := make([]mangadex_api.SimpleChapter, 0, end-offset)
+	for _, chapter := range selected[offset:end] {
 		simplifiedChapters = append(simplifiedChapters, mangadex_api.TransformToSimpleChapter(chapter))
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"result": "ok",
-		"data":   simplifiedChapters,
-		"total":  response.Total,
-		"limit":  response.Limit,
-		"offset": response.Offset,
+		"result":             "ok",
+		"data":               simplifiedChapters,
+		"total":              len(selected),
+		"limit":              limit,
+		"offset":             offset,
+		"availableLanguages": languages,
+		"scanlationGroups":   groupOptions,
+		"language":           language,
+		"scanlationGroup":    scanlationGroup,
 	})
+}
+
+func getAllMangaChapters(mangaID string) ([]mangadex_api.ChapterData, error) {
+	const pageSize = 100
+	chapters := make([]mangadex_api.ChapterData, 0, pageSize)
+	for offset := 0; ; offset += pageSize {
+		response, err := mangadex_api.GetMangaChapters(mangaID, pageSize, offset, nil)
+		if err != nil {
+			return nil, err
+		}
+		chapters = append(chapters, response.Data...)
+		if len(response.Data) == 0 || len(chapters) >= response.Total {
+			return chapters, nil
+		}
+	}
 }
 
 // getChapterByID retrieves a specific chapter by ID

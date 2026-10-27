@@ -58,6 +58,7 @@ const HorizontalNavbar: React.FC<NavbarProps> = ({ searchQuery, setSearchQuery }
                     <Nav className="me-auto">
                         <Nav.Link as={Link} to="/">Home</Nav.Link>
                         <Nav.Link as={Link} to="/manga/search">Manga</Nav.Link>
+                        {user && <Nav.Link as={Link} to="/chat">Chatrooms</Nav.Link>}
                     </Nav>
                     <Form className="d-flex align-items-center" onSubmit={handleSearchSubmit}>
                         <FormControl
@@ -80,16 +81,19 @@ const HorizontalNavbar: React.FC<NavbarProps> = ({ searchQuery, setSearchQuery }
                         </Button>
                         {user ? (
                             <NavDropdown 
-                                title={`👤 ${user.email.split('@')[0]}`} 
+                                title={`👤 ${user.displayName || user.email.split('@')[0]}`}
                                 id="user-dropdown"
                                 align="end"
                             >
                                 <NavDropdown.Item as={Link} to="/profile">
-                                    My Profile
+                                    Settings
                                 </NavDropdown.Item>
                                 <NavDropdown.Item as={Link} to="/library">
-                                    My Library
+                                    My Profile
                                 </NavDropdown.Item>
+                                {user.role === 'admin' && <NavDropdown.Item as={Link} to="/admin">
+                                    Administration
+                                </NavDropdown.Item>}
                                 <NavDropdown.Divider />
                                 <NavDropdown.Item onClick={handleLogout}>
                                     Logout

@@ -16,6 +16,12 @@ func RunMigrations() {
 		id SERIAL PRIMARY KEY,
 		email VARCHAR(255) UNIQUE NOT NULL,
 		password_hash VARCHAR(255) NOT NULL,
+		role VARCHAR(32) NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+		display_name VARCHAR(80) NOT NULL DEFAULT '',
+		profile_image_path VARCHAR(512) NOT NULL DEFAULT '',
+		display_theme VARCHAR(24) NOT NULL DEFAULT 'midnight',
+		custom_theme_color VARCHAR(7) NOT NULL DEFAULT '',
+		theme_image_path VARCHAR(512) NOT NULL DEFAULT '',
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -35,6 +41,38 @@ func RunMigrations() {
 	);
 	CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 	CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+	`
+
+	addSecureSessionFields := `
+	ALTER TABLE users
+		ADD COLUMN IF NOT EXISTS role VARCHAR(32) NOT NULL DEFAULT 'user'
+		CHECK (role IN ('user', 'admin'));
+	ALTER TABLE sessions
+		ADD COLUMN IF NOT EXISTS verifier_hash VARCHAR(64),
+		ADD COLUMN IF NOT EXISTS idle_expires_at TIMESTAMP,
+		ADD COLUMN IF NOT EXISTS absolute_expires_at TIMESTAMP,
+		ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP;
+	CREATE INDEX IF NOT EXISTS idx_sessions_active_lookup
+		ON sessions(id, idle_expires_at, absolute_expires_at)
+		WHERE revoked_at IS NULL;
+	`
+
+	addUserProfileFields := `
+	ALTER TABLE users
+		ADD COLUMN IF NOT EXISTS display_name VARCHAR(80) NOT NULL DEFAULT '',
+		ADD COLUMN IF NOT EXISTS profile_image_path VARCHAR(512) NOT NULL DEFAULT '';
+	UPDATE users
+		SET display_name = split_part(email, '@', 1)
+		WHERE display_name = '';
+	`
+
+	addDisplayThemeFields := `
+	ALTER TABLE users
+		ADD COLUMN IF NOT EXISTS display_theme VARCHAR(24) NOT NULL DEFAULT 'midnight',
+		ADD COLUMN IF NOT EXISTS custom_theme_color VARCHAR(7) NOT NULL DEFAULT '',
+		ADD COLUMN IF NOT EXISTS theme_image_path VARCHAR(512) NOT NULL DEFAULT '';
+	UPDATE users SET display_theme = 'midnight'
+		WHERE display_theme IS NULL OR display_theme = '';
 	`
 
 	// Create manga table with MangaDex-specific fields
@@ -142,6 +180,148 @@ func RunMigrations() {
 		ON user_library_manga(user_id, added_at DESC);
 	`
 
+	createAniListLibraryTable := `
+	CREATE TABLE IF NOT EXISTS user_library_anilist_manga (
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		anilist_id INTEGER NOT NULL,
+		added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		reading_status VARCHAR(32) NOT NULL DEFAULT 'PLAN_TO_READ' CHECK (reading_status IN ('PLAN_TO_READ', 'CURRENTLY_READING', 'ON_HOLD', 'READ', 'DROPPED')),
+		personal_rating SMALLINT CHECK (personal_rating BETWEEN 1 AND 10),
+		PRIMARY KEY (user_id, anilist_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_user_library_anilist_user_added
+		ON user_library_anilist_manga(user_id, added_at DESC);
+	`
+
+	addAniListLibraryReadingStatus := `
+	ALTER TABLE user_library_anilist_manga
+		ADD COLUMN IF NOT EXISTS reading_status VARCHAR(32) NOT NULL DEFAULT 'PLAN_TO_READ'
+		CHECK (reading_status IN ('PLAN_TO_READ', 'CURRENTLY_READING', 'ON_HOLD', 'READ', 'DROPPED'));
+	CREATE INDEX IF NOT EXISTS idx_user_library_anilist_user_status
+		ON user_library_anilist_manga(user_id, reading_status);
+	`
+
+	addAniListLibraryPersonalRating := `
+	ALTER TABLE user_library_anilist_manga
+		ADD COLUMN IF NOT EXISTS personal_rating SMALLINT CHECK (personal_rating BETWEEN 1 AND 10);
+	`
+
+	addAniListLibraryCompletedAt := `
+	ALTER TABLE user_library_anilist_manga
+		ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP;
+	UPDATE user_library_anilist_manga
+		SET completed_at = added_at
+		WHERE reading_status = 'READ' AND completed_at IS NULL;
+	CREATE INDEX IF NOT EXISTS idx_user_library_anilist_user_completed
+		ON user_library_anilist_manga(user_id, completed_at DESC)
+		WHERE reading_status = 'READ';
+	`
+
+	createFavoriteTables := `
+	CREATE TABLE IF NOT EXISTS user_favorite_anilist_manga (
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		anilist_id INTEGER NOT NULL,
+		added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (user_id, anilist_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_user_favorite_anilist_user_added
+		ON user_favorite_anilist_manga(user_id, added_at DESC);
+	CREATE TABLE IF NOT EXISTS user_favorite_manga (
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		manga_id INTEGER NOT NULL REFERENCES manga(id) ON DELETE CASCADE,
+		added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (user_id, manga_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_user_favorite_manga_user_added
+		ON user_favorite_manga(user_id, added_at DESC);
+	`
+
+	createAniListCharacterFavoriteTable := `
+	CREATE TABLE IF NOT EXISTS user_favorite_anilist_character (
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		character_id INTEGER NOT NULL,
+		source_anilist_manga_id INTEGER NOT NULL,
+		role TEXT NOT NULL DEFAULT '',
+		added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (user_id, character_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_user_favorite_anilist_character_user_added
+		ON user_favorite_anilist_character(user_id, added_at DESC);
+	`
+
+	addPreferredTranslationLanguage := `
+	ALTER TABLE users
+		ADD COLUMN IF NOT EXISTS preferred_translation_language VARCHAR(16) NOT NULL DEFAULT 'all';
+	`
+
+	addPreferredReadingMode := `
+	ALTER TABLE users
+		ADD COLUMN IF NOT EXISTS preferred_reading_mode VARCHAR(16) NOT NULL DEFAULT 'vertical'
+		CHECK (preferred_reading_mode IN ('vertical', 'ltr', 'rtl'));
+	`
+
+	createScanlationGroupPreferences := `
+	CREATE TABLE IF NOT EXISTS user_manga_scanlation_group_preferences (
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		manga_mangadex_id VARCHAR(64) NOT NULL,
+		language VARCHAR(16) NOT NULL,
+		scanlation_group_id VARCHAR(64) NOT NULL,
+		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (user_id, manga_mangadex_id, language)
+	);
+	`
+
+	createChatTables := `
+	CREATE TABLE IF NOT EXISTS chat_rooms (
+		id BIGSERIAL PRIMARY KEY,
+		name VARCHAR(80) NOT NULL,
+		visibility VARCHAR(16) NOT NULL CHECK (visibility IN ('public', 'invite_only')),
+		image_path VARCHAR(512) NOT NULL DEFAULT '',
+		theme VARCHAR(24) NOT NULL DEFAULT 'midnight',
+		custom_theme_color VARCHAR(7) NOT NULL DEFAULT '',
+		theme_image_path VARCHAR(512) NOT NULL DEFAULT '',
+		owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE INDEX IF NOT EXISTS idx_chat_rooms_visibility_created
+		ON chat_rooms(visibility, created_at DESC);
+	CREATE TABLE IF NOT EXISTS chat_room_members (
+		room_id BIGINT NOT NULL REFERENCES chat_rooms(id) ON DELETE CASCADE,
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		joined_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (room_id, user_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_chat_room_members_user
+		ON chat_room_members(user_id, joined_at DESC);
+	CREATE TABLE IF NOT EXISTS chat_room_invites (
+		id BIGSERIAL PRIMARY KEY,
+		room_id BIGINT NOT NULL REFERENCES chat_rooms(id) ON DELETE CASCADE,
+		created_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		token_hash VARCHAR(64) NOT NULL UNIQUE,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE INDEX IF NOT EXISTS idx_chat_room_invites_room
+		ON chat_room_invites(room_id, created_at DESC);
+	CREATE TABLE IF NOT EXISTS chat_messages (
+		id BIGSERIAL PRIMARY KEY,
+		room_id BIGINT NOT NULL REFERENCES chat_rooms(id) ON DELETE CASCADE,
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		body VARCHAR(2000) NOT NULL,
+		image_path VARCHAR(512) NOT NULL DEFAULT '',
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE INDEX IF NOT EXISTS idx_chat_messages_room_id
+		ON chat_messages(room_id, id DESC);
+	ALTER TABLE chat_rooms
+		ADD COLUMN IF NOT EXISTS image_path VARCHAR(512) NOT NULL DEFAULT '';
+	ALTER TABLE chat_messages
+		ADD COLUMN IF NOT EXISTS image_path VARCHAR(512) NOT NULL DEFAULT '';
+	ALTER TABLE chat_rooms
+		ADD COLUMN IF NOT EXISTS theme VARCHAR(24) NOT NULL DEFAULT 'midnight',
+		ADD COLUMN IF NOT EXISTS custom_theme_color VARCHAR(7) NOT NULL DEFAULT '',
+		ADD COLUMN IF NOT EXISTS theme_image_path VARCHAR(512) NOT NULL DEFAULT '';
+	`
+
 	// Execute migrations
 	migrations := []struct {
 		name  string
@@ -149,11 +329,24 @@ func RunMigrations() {
 	}{
 		{"users_table", createUsersTable},
 		{"sessions_table", createSessionsTable},
+		{"secure_session_fields", addSecureSessionFields},
+		{"user_profile_fields", addUserProfileFields},
+		{"display_theme_fields", addDisplayThemeFields},
 		{"manga_table", createMangaTable},
 		{"chapters_table", createChaptersTable},
 		{"chapter_pages_table", createChapterPagesTable},
 		{"reading_progress_table", createReadingProgressTable},
 		{"user_library_manga_table", createUserLibraryTable},
+		{"user_library_anilist_manga_table", createAniListLibraryTable},
+		{"user_library_anilist_reading_status", addAniListLibraryReadingStatus},
+		{"user_library_anilist_personal_rating", addAniListLibraryPersonalRating},
+		{"user_library_anilist_completed_at", addAniListLibraryCompletedAt},
+		{"user_favorite_tables", createFavoriteTables},
+		{"user_favorite_anilist_character_table", createAniListCharacterFavoriteTable},
+		{"user_preferred_translation_language", addPreferredTranslationLanguage},
+		{"user_preferred_reading_mode", addPreferredReadingMode},
+		{"user_manga_scanlation_group_preferences", createScanlationGroupPreferences},
+		{"chatrooms", createChatTables},
 	}
 
 	for _, migration := range migrations {

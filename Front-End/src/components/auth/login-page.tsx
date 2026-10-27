@@ -13,6 +13,8 @@ const LoginPage: React.FC = () => {
     const location = useLocation();
 
     const from = (location.state as any)?.from?.pathname || '/';
+    const sessionExpired = Boolean((location.state as any)?.sessionExpired);
+    const notice = (location.state as any)?.notice as string | undefined;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -28,7 +30,6 @@ const LoginPage: React.FC = () => {
             await login(email, password);
             navigate(from, { replace: true });
         } catch (err: any) {
-            // Handle JWT authentication errors
             const errorMessage = err?.details?.message || err?.message || 'Failed to login. Please check your credentials.';
             setError(errorMessage);
         } finally {
@@ -42,6 +43,8 @@ const LoginPage: React.FC = () => {
                 <Card>
                     <Card.Body>
                         <h2 className="text-center mb-4">Login to TaleHaven</h2>
+                        {notice && <Alert variant="info">{notice}</Alert>}
+                        {sessionExpired && <Alert variant="warning">Your session expired. Please log in again.</Alert>}
                         {error && <Alert variant="danger">{error}</Alert>}
                         <Form onSubmit={handleSubmit}>
                             <Form.Group className="mb-3" controlId="email">

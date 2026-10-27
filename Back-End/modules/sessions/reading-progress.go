@@ -41,6 +41,13 @@ type UserReadingData struct {
 	UpdatedAt time.Time                 `json:"updatedAt"`
 }
 
+// LastReadManga identifies the MangaDex title with the most recent recorded
+// TaleHaven reading activity for a user.
+type LastReadManga struct {
+	MangaID    string
+	LastReadAt time.Time
+}
+
 // ============================================================================
 // MAIN API - Used by controllers
 // ============================================================================
@@ -310,6 +317,66 @@ func GetAllReadingProgress(userID int) (*UserReadingData, error) {
 	}
 
 	return userData, nil
+}
+
+// CountCompletedChapters returns the number of unique chapters a user has
+// finished in TaleHaven. It merges PostgreSQL history with active Redis
+// progress, so a chapter completed in the current reading session is counted
+// before its background synchronization finishes.
+func CountCompletedChapters(userID int) (int, error) {
+	progress, err := GetAllReadingProgress(userID)
+	if err != nil {
+		return 0, err
+	}
+	return countCompletedChapters(progress), nil
+}
+
+// GetReadingStatistics derives profile statistics from one merged snapshot of
+// persisted and active reader progress.
+func GetReadingStatistics(userID int) (int, *LastReadManga, error) {
+	progress, err := GetAllReadingProgress(userID)
+	if err != nil {
+		return 0, nil, err
+	}
+	return countCompletedChapters(progress), findLastReadManga(progress), nil
+}
+
+func countCompletedChapters(progress *UserReadingData) int {
+	completed := 0
+	for _, manga := range progress.Mangas {
+		for _, chapter := range manga.Chapters {
+			if chapter.TotalPages > 0 && chapter.CurrentPage >= chapter.TotalPages {
+				completed++
+			}
+		}
+	}
+	return completed
+}
+
+// GetLastReadManga returns the MangaDex ID of the title last read through
+// TaleHaven. Like chapter counts, it includes active Redis progress.
+func GetLastReadManga(userID int) (*LastReadManga, error) {
+	progress, err := GetAllReadingProgress(userID)
+	if err != nil {
+		return nil, err
+	}
+	return findLastReadManga(progress), nil
+}
+
+func findLastReadManga(progress *UserReadingData) *LastReadManga {
+	if progress == nil {
+		return nil
+	}
+
+	var latest *LastReadManga
+	for mangaID, manga := range progress.Mangas {
+		for _, chapter := range manga.Chapters {
+			if latest == nil || chapter.LastReadAt.After(latest.LastReadAt) {
+				latest = &LastReadManga{MangaID: mangaID, LastReadAt: chapter.LastReadAt}
+			}
+		}
+	}
+	return latest
 }
 
 // GetReadMangaList retrieves the list of manga IDs that the user has read

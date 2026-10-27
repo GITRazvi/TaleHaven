@@ -6,6 +6,7 @@ import (
 	"TaleHaven-Backend/modules/cache"
 	"TaleHaven-Backend/modules/cleanup"
 	"TaleHaven-Backend/modules/database"
+	"TaleHaven-Backend/modules/sessions"
 	"TaleHaven-Backend/modules/utils"
 	"net/http"
 
@@ -31,6 +32,9 @@ func main() {
 
 	database.InitPostgres()
 	defer database.CloseDB()
+	if err := sessions.CleanupExpiredAuthenticatedSessions(); err != nil {
+		utils.Logger.Warn("Failed to clean up expired authenticated sessions", zap.Error(err))
+	}
 
 	// Add CORS middleware
 	router.Use(corsMiddleware())
@@ -49,20 +53,15 @@ func main() {
 
 // corsMiddleware adds the CORS headers to allow cross-origin requests.
 func corsMiddleware() gin.HandlerFunc {
-	allowedOrigins := map[string]bool{
-		"http://localhost:3000": true,
-		"http://127.0.0.1:3000": true,
-	}
-
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
-		if allowedOrigins[origin] {
+		if middlewares.IsTrustedRequestOrigin(origin) {
 			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
 
 		c.Writer.Header().Set("Vary", "Origin")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
 		c.Writer.Header().Set("Access-Control-Expose-Headers", "Content-Length, Content-Type")
 
@@ -83,10 +82,16 @@ func addRoutes(router *gin.Engine) {
 
 	// Authentication endpoints
 	controllers.AuthController(router)
+	controllers.ProfileController(router)
+	controllers.AdminController(router)
 
 	controllers.MangaDexController(router)
+	controllers.AniListController(router)
 	controllers.LibraryController(router)
+	controllers.FavoritesController(router)
 	controllers.ReadingProgressController(router)
+	controllers.SettingsController(router)
+	controllers.ChatController(router)
 
 	router.NoRoute(func(c *gin.Context) {
 		resp := gin.H{

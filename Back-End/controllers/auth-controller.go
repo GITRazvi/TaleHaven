@@ -4,7 +4,7 @@ import (
 	"TaleHaven-Backend/middlewares"
 	"TaleHaven-Backend/modules/auth"
 	"TaleHaven-Backend/modules/database"
-	jwtModule "TaleHaven-Backend/modules/jwt"
+	"TaleHaven-Backend/modules/sessions"
 	"TaleHaven-Backend/modules/utils"
 	"net/http"
 	"strings"
@@ -16,16 +16,17 @@ import (
 // AuthController sets up authentication routes
 func AuthController(router *gin.Engine) {
 	authRoutes := router.Group("/auth")
+	authRoutes.Use(middlewares.RequireTrustedOrigin())
 	{
 		authRoutes.POST("/register", registerHandler)
 		authRoutes.POST("/login", loginHandler)
 		authRoutes.POST("/logout", logoutHandler)
-		authRoutes.GET("/me", getCurrentUserHandler)
-		
+
 		// Protected routes requiring authentication
 		protected := authRoutes.Group("")
 		protected.Use(middlewares.AuthMiddleware())
 		{
+			protected.GET("/me", getCurrentUserHandler)
 			protected.PUT("/password", changePasswordHandler)
 			protected.DELETE("/account", deleteAccountHandler)
 		}
@@ -52,17 +53,29 @@ type ChangePasswordRequest struct {
 
 // UserResponse represents the user data returned in API responses
 type UserResponse struct {
-	ID        int    `json:"id"`
-	Email     string `json:"email"`
-	CreatedAt string `json:"created_at"`
+	ID               int    `json:"id"`
+	Email            string `json:"email"`
+	Role             string `json:"role"`
+	DisplayName      string `json:"displayName"`
+	ProfileImagePath string `json:"profileImagePath"`
+	DisplayTheme     string `json:"displayTheme"`
+	CustomThemeColor string `json:"customThemeColor"`
+	ThemeImagePath   string `json:"themeImagePath"`
+	CreatedAt        string `json:"created_at"`
 }
 
 // toUserResponse converts a User model to UserResponse
 func toUserResponse(user *database.User) UserResponse {
 	return UserResponse{
-		ID:        user.ID,
-		Email:     user.Email,
-		CreatedAt: user.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		ID:               user.ID,
+		Email:            user.Email,
+		Role:             user.Role,
+		DisplayName:      user.DisplayName,
+		ProfileImagePath: user.ProfileImagePath,
+		DisplayTheme:     user.DisplayTheme,
+		CustomThemeColor: user.CustomThemeColor,
+		ThemeImagePath:   user.ThemeImagePath,
+		CreatedAt:        user.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
 
@@ -101,10 +114,11 @@ func registerHandler(c *gin.Context) {
 		return
 	}
 
-	// Generate JWT token
-	token, err := jwtModule.GenerateToken(user.ID, user.Email)
+	// Create a revocable server-side session and set only its opaque token in
+	// the HttpOnly cookie.
+	token, err := sessions.CreateAuthenticatedSession(user.ID, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		utils.Logger.Error("Failed to generate JWT token", zap.Error(err))
+		utils.Logger.Error("Failed to create session", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Registration failed",
 			"message": "Failed to create session. Please try again later",
@@ -112,16 +126,7 @@ func registerHandler(c *gin.Context) {
 		return
 	}
 
-	// Set JWT token in cookie
-	c.SetCookie(
-		middlewares.AuthCookieName,
-		token,
-		int(jwtModule.TokenDuration.Seconds()),
-		"/",
-		"",
-		false, // Set to true in production with HTTPS
-		true,  // HttpOnly
-	)
+	middlewares.SetAuthCookie(c, token)
 
 	utils.Logger.Info("User registered successfully", zap.Int("user_id", user.ID), zap.String("email", user.Email))
 
@@ -167,10 +172,9 @@ func loginHandler(c *gin.Context) {
 		return
 	}
 
-	// Generate JWT token
-	token, err := jwtModule.GenerateToken(user.ID, user.Email)
+	token, err := sessions.CreateAuthenticatedSession(user.ID, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
-		utils.Logger.Error("Failed to generate JWT token", zap.Error(err))
+		utils.Logger.Error("Failed to create session", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Login failed",
 			"message": "Failed to create session. Please try again later",
@@ -178,16 +182,7 @@ func loginHandler(c *gin.Context) {
 		return
 	}
 
-	// Set JWT token in cookie
-	c.SetCookie(
-		middlewares.AuthCookieName,
-		token,
-		int(jwtModule.TokenDuration.Seconds()),
-		"/",
-		"",
-		false, // Set to true in production with HTTPS
-		true,  // HttpOnly
-	)
+	middlewares.SetAuthCookie(c, token)
 
 	utils.Logger.Info("User logged in successfully",
 		zap.Int("user_id", user.ID),
@@ -202,16 +197,14 @@ func loginHandler(c *gin.Context) {
 // logoutHandler handles user logout
 // POST /auth/logout
 func logoutHandler(c *gin.Context) {
-	// Clear the JWT cookie by setting it with negative max age
-	c.SetCookie(
-		middlewares.AuthCookieName,
-		"",
-		-1,
-		"/",
-		"",
-		false,
-		true,
-	)
+	if token, err := c.Cookie(middlewares.AuthCookieName); err == nil {
+		if revokeErr := sessions.RevokeAuthenticatedSession(token); revokeErr != nil {
+			utils.Logger.Error("Failed to revoke session during logout", zap.Error(revokeErr))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Logout failed", "message": "Unable to end the session. Please try again."})
+			return
+		}
+	}
+	middlewares.ClearAuthCookie(c)
 
 	utils.Logger.Info("User logged out")
 
@@ -223,38 +216,10 @@ func logoutHandler(c *gin.Context) {
 // getCurrentUserHandler returns the currently authenticated user's data
 // GET /auth/me
 func getCurrentUserHandler(c *gin.Context) {
-	// Try to get user from context (set by AuthMiddleware if authenticated)
 	userData, exists := c.Get("user")
 	if !exists {
-		// Try to get JWT token and validate manually
-		tokenString, err := c.Cookie(middlewares.AuthCookieName)
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error":   "Not authenticated",
-				"message": "You must be logged in to access this resource",
-			})
-			return
-		}
-
-		claims, err := jwtModule.ValidateToken(tokenString)
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error":   "Not authenticated",
-				"message": "You must be logged in to access this resource",
-			})
-			return
-		}
-
-		// Load user data
-		user, err := auth.GetUserByID(claims.UserID)
-		if err != nil {
-			utils.Logger.Error("Failed to load user", zap.Error(err), zap.Int("user_id", claims.UserID))
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "Failed to load user data",
-			})
-			return
-		}
-		userData = user
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Not authenticated", "message": "You must be logged in to access this resource"})
+		return
 	}
 
 	user, ok := userData.(*database.User)
@@ -305,7 +270,7 @@ func changePasswordHandler(c *gin.Context) {
 	if !auth.ValidatePassword(user.PasswordHash, req.OldPassword) {
 		utils.Logger.Info("Failed password change attempt - incorrect old password",
 			zap.Int("user_id", user.ID))
-		
+
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error":   "Invalid password",
 			"message": "Current password is incorrect",
@@ -323,6 +288,12 @@ func changePasswordHandler(c *gin.Context) {
 		})
 		return
 	}
+	if err := sessions.RevokeAllAuthenticatedSessions(user.ID); err != nil {
+		utils.Logger.Error("Failed to revoke sessions after password change", zap.Error(err), zap.Int("user_id", user.ID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Password change failed", "message": "Password changed but sessions could not be secured. Please try again."})
+		return
+	}
+	middlewares.ClearAuthCookie(c)
 
 	utils.Logger.Info("Password changed successfully", zap.Int("user_id", user.ID))
 
@@ -362,6 +333,9 @@ func deleteAccountHandler(c *gin.Context) {
 		})
 		return
 	}
+	removeStoredProfilePhoto(user.ProfileImagePath)
+	removeStoredProfileThemeImage(user.ThemeImagePath)
+	middlewares.ClearAuthCookie(c)
 
 	utils.Logger.Info("User account deleted", zap.Int("user_id", user.ID), zap.String("email", user.Email))
 
@@ -369,4 +343,3 @@ func deleteAccountHandler(c *gin.Context) {
 		"message": "Account deleted successfully",
 	})
 }
-

@@ -1,0 +1,13 @@
+.git
+.idea
+.env
+Plan
+images
+*.exe
+*.exe~
+*.log
+download-covers.go
+get-reading-progress.go
+sync-database.go
+test-*.go
+test-*.ps1

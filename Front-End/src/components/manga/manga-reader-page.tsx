@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Spinner } from 'react-bootstrap';
+import { Button, Form, Spinner } from 'react-bootstrap';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import Backend from '../../app/clients/backend/backend';
 
@@ -46,6 +46,28 @@ type PendingProgress = {
   totalPages: number;
 };
 
+type ChapterFilters = {
+  language?: string;
+  scanlationGroup?: string;
+};
+
+type ChapterNavigationEntry = {
+  id: string;
+  number: string;
+};
+
+type ReadingMode = 'vertical' | 'ltr' | 'rtl';
+
+const isReadingMode = (value: unknown): value is ReadingMode => (
+  value === 'vertical' || value === 'ltr' || value === 'rtl'
+);
+
+const hasMissingNumberedChapter = (currentNumber: string, nextNumber: string) => {
+  const current = Number(currentNumber);
+  const next = Number(nextNumber);
+  return Number.isInteger(current) && Number.isInteger(next) && next > current + 1;
+};
+
 const MangaReaderPage: React.FC = () => {
   const backend = useMemo(() => new Backend(), []);
   const navigate = useNavigate();
@@ -59,15 +81,31 @@ const MangaReaderPage: React.FC = () => {
   const progressResolvedRef = useRef<boolean>(false);
   const lastSavedPageRef = useRef<number | null>(null);
   const completionSyncedRef = useRef<boolean>(false);
+  const openedCompletedChapterRef = useRef<boolean>(false);
   const pendingProgressRef = useRef<PendingProgress | null>(null);
   const isPersistingProgressRef = useRef<boolean>(false);
   const readerSessionRef = useRef<number>(0);
+  const pagedRequestRef = useRef<number>(0);
 
   // Get chapter IDs and an optional explicit starting page from navigation state.
   // An explicit start page is used by “Read from page 1” and takes precedence
   // over saved reading progress.
   const chapterIds = useMemo(() => {
     return (location.state as { chapterIds?: string[] })?.chapterIds || [];
+  }, [location.state]);
+  const chapterNavigation = useMemo<ChapterNavigationEntry[]>(() => {
+    const entries = (location.state as { chapterNavigation?: unknown } | null)?.chapterNavigation;
+    if (!Array.isArray(entries)) return [];
+    return entries.filter((entry): entry is ChapterNavigationEntry => Boolean(
+      entry && typeof entry === 'object' && typeof (entry as ChapterNavigationEntry).id === 'string' && typeof (entry as ChapterNavigationEntry).number === 'string',
+    ));
+  }, [location.state]);
+  const chapterFilters = useMemo<ChapterFilters>(() => {
+    const filters = (location.state as { chapterFilters?: ChapterFilters } | null)?.chapterFilters;
+    return {
+      language: filters?.language || 'all',
+      scanlationGroup: filters?.scanlationGroup || 'all',
+    };
   }, [location.state]);
   const startAtPage = useMemo(() => {
     const requestedPage = (location.state as { startAtPage?: unknown } | null)?.startAtPage;
@@ -87,6 +125,13 @@ const MangaReaderPage: React.FC = () => {
   const [nextChapterId, setNextChapterId] = useState<string | null>(null);
   const [mangaTitle, setMangaTitle] = useState<string>('');
   const [chapterNumber, setChapterNumber] = useState<string>('');
+  const [readingMode, setReadingMode] = useState<ReadingMode>('vertical');
+  const [readingModeResolved, setReadingModeResolved] = useState(false);
+  const [activePage, setActivePage] = useState<number>(1);
+  const [pageSelection, setPageSelection] = useState('1');
+  const [pagedPageUrl, setPagedPageUrl] = useState<string>('');
+  const [pagedPageLoading, setPagedPageLoading] = useState(false);
+  const [pagedPageError, setPagedPageError] = useState<string>('');
 
   const preserveViewport = (applyChange: () => void) => {
     const viewportCenter = window.innerHeight / 2;
@@ -171,6 +216,9 @@ const MangaReaderPage: React.FC = () => {
       !mangaId ||
       !chapterId ||
       chapterPageCountRef.current < 1 ||
+      // Replaying a completed chapter starts at page 1, but page 1 must never
+      // overwrite the existing completed progress record.
+      openedCompletedChapterRef.current ||
       lastSavedPageRef.current === page
     ) {
       return;
@@ -192,6 +240,95 @@ const MangaReaderPage: React.FC = () => {
     };
     void flushProgressQueue();
   }, [chapterId, flushProgressQueue, mangaId]);
+
+  const isPageLoaded = useCallback((page: number) => (
+    Boolean(pageElementsRef.current[page - 1]?.dataset.pageLoaded === 'true')
+  ), []);
+
+  const loadPagedPage = useCallback(async (requestedPage: number) => {
+    if (!chapterId || requestedPage < 1 || (chapterPageCountRef.current > 0 && requestedPage > chapterPageCountRef.current)) {
+      return;
+    }
+
+    const requestID = pagedRequestRef.current + 1;
+    pagedRequestRef.current = requestID;
+    currentPageRef.current = requestedPage;
+    setActivePage(requestedPage);
+    setPagedPageUrl('');
+    setPagedPageError('');
+    setPagedPageLoading(true);
+
+    try {
+      const response = await backend.getChapterPage(chapterId, requestedPage, 'data');
+      if (requestID !== pagedRequestRef.current) {
+        return;
+      }
+
+      const resolvedPage = Number(response.pageNumber);
+      const totalPages = Number(response.totalPages);
+      if (!Number.isInteger(resolvedPage) || resolvedPage < 1 || !Number.isInteger(totalPages) || totalPages < 1 || !response.pageUrl) {
+        throw new Error('The server returned an invalid chapter page.');
+      }
+
+      chapterPageCountRef.current = totalPages;
+      currentPageRef.current = resolvedPage;
+      setActivePage(resolvedPage);
+      setPageSelection(String(resolvedPage));
+      setPagedPageUrl(backend.getImageUrl(normalizePagePath(response.pageUrl)));
+      setLoadedPagesCount(1);
+      setIsLoading(false);
+    } catch (err: any) {
+      if (requestID !== pagedRequestRef.current) {
+        return;
+      }
+      setPagedPageError(err?.message || `Unable to load page ${requestedPage}.`);
+      setIsLoading(false);
+      setPagedPageLoading(false);
+    }
+  }, [backend, chapterId]);
+
+  const moveReaderPage = useCallback((direction: -1 | 1) => {
+    const targetPage = currentPageRef.current + direction;
+    if (targetPage < 1 || (chapterPageCountRef.current > 0 && targetPage > chapterPageCountRef.current)) {
+      return;
+    }
+
+    if (readingMode !== 'vertical') {
+      void loadPagedPage(targetPage);
+      return;
+    }
+
+    if (!isPageLoaded(targetPage)) return;
+
+    const targetElement = pageElementsRef.current[targetPage - 1];
+    currentPageRef.current = targetPage;
+    setActivePage(targetPage);
+    hasScrolledToResume.current = true;
+    persistPage(targetPage);
+
+    if (readingMode === 'vertical') {
+      targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [isPageLoaded, loadPagedPage, persistPage, readingMode]);
+
+  useEffect(() => {
+    let isCurrent = true;
+
+    backend.getReadingSettings()
+      .then((settings) => {
+        if (isCurrent && isReadingMode(settings.preferredReadingMode)) {
+          setReadingMode(settings.preferredReadingMode);
+        }
+      })
+      // Guests and an unavailable settings service retain the safe vertical
+      // default; reading itself must not depend on this optional preference.
+      .catch(() => {})
+      .finally(() => {
+        if (isCurrent) setReadingModeResolved(true);
+      });
+
+    return () => { isCurrent = false; };
+  }, [backend]);
 
   useEffect(() => {
     let isCurrent = true;
@@ -232,6 +369,9 @@ const MangaReaderPage: React.FC = () => {
 
   useEffect(() => {
     const loadPages = async () => {
+      if (!readingModeResolved) {
+        return;
+      }
       console.log('[Reader] loadPages called with chapterId:', chapterId, 'mangaId:', mangaId);
 
       if (!chapterId) {
@@ -246,11 +386,18 @@ const MangaReaderPage: React.FC = () => {
       setError('');
       setLoadedPagesCount(0);
       setRenderedPagesCount(0);
+      setActivePage(1);
+      setPageSelection('1');
+      setPagedPageUrl('');
+      setPagedPageError('');
+      setPagedPageLoading(false);
+      pagedRequestRef.current += 1;
       chapterPageCountRef.current = 0;
       currentPageRef.current = 1;
       progressResolvedRef.current = false;
       lastSavedPageRef.current = null;
       completionSyncedRef.current = false;
+      openedCompletedChapterRef.current = false;
       setResumePage(0);
       hasScrolledToResume.current = false;
       pageElementsRef.current = [];
@@ -271,12 +418,27 @@ const MangaReaderPage: React.FC = () => {
         const baseUrl = backend.getBaseUrl();
         let requestedStartPage = startAtPage ?? 1;
 
-        if (startAtPage === null && mangaId) {
+        if (mangaId) {
           setLoadingMessage('Finding your last read page...');
           try {
             const progress = await backend.getChapterProgress(chapterId, mangaId);
             const savedPage = progress.data?.currentPage;
-            if (typeof savedPage === 'number' && savedPage >= 1) {
+            const savedTotalPages = progress.data?.totalPages;
+            const wasCompleted = typeof savedPage === 'number'
+              && typeof savedTotalPages === 'number'
+              && savedTotalPages >= 1
+              && savedPage >= savedTotalPages;
+
+            if (wasCompleted) {
+              // This also handles the historical bulk-marking sentinel. The
+              // chapter replays safely from page 1 without downgrading read
+              // state when the first page loads.
+              openedCompletedChapterRef.current = true;
+              completionSyncedRef.current = true;
+              if (startAtPage === null) {
+                requestedStartPage = 1;
+              }
+            } else if (startAtPage === null && typeof savedPage === 'number' && savedPage >= 1) {
               requestedStartPage = savedPage;
             }
           } catch (err: any) {
@@ -284,6 +446,25 @@ const MangaReaderPage: React.FC = () => {
               console.warn('[Reader] Error loading progress:', err);
             }
           }
+        }
+
+        if (readingMode !== 'vertical') {
+          const pageCountResponse = await backend.getChapterPageCount(chapterId, 'data');
+          const totalPages = Number(pageCountResponse.totalPages);
+          if (!Number.isInteger(totalPages) || totalPages < 1) {
+            throw new Error('No pages are available for this chapter.');
+          }
+          chapterPageCountRef.current = totalPages;
+
+          // A completed chapter should reopen from page 1. Invalid historical
+          // values (including corrupted progress) use the same safe fallback.
+          if (startAtPage === null && (requestedStartPage < 1 || requestedStartPage >= totalPages)) {
+            requestedStartPage = 1;
+          } else {
+            requestedStartPage = Math.max(1, Math.min(requestedStartPage, totalPages));
+          }
+          await loadPagedPage(requestedStartPage);
+          return;
         }
 
         const url = `${baseUrl}/chapter/${encodeURIComponent(chapterId)}/pages/stream?quality=data&startPage=${requestedStartPage}`;
@@ -333,6 +514,7 @@ const MangaReaderPage: React.FC = () => {
               ? Math.max(1, Math.min(page, totalPages))
               : Math.max(1, page);
             currentPageRef.current = clampedPage;
+            setActivePage(clampedPage);
             setResumePage(clampedPage);
             progressResolvedRef.current = true;
           };
@@ -519,7 +701,7 @@ const MangaReaderPage: React.FC = () => {
         cleanup.then((fn) => fn && fn());
       }
     };
-  }, [backend, chapterId, mangaId, startAtPage]);
+  }, [backend, chapterId, loadPagedPage, mangaId, readingMode, readingModeResolved, startAtPage]);
 
   // Load chapters for navigation
   useEffect(() => {
@@ -537,7 +719,10 @@ const MangaReaderPage: React.FC = () => {
         }
 
         if (currentIndex < chapterIds.length - 1) {
-          setNextChapterId(chapterIds[currentIndex + 1]);
+          const current = chapterNavigation[currentIndex];
+          const next = chapterNavigation[currentIndex + 1];
+          const hasGap = chapterFilters.scanlationGroup !== 'all' && current && next && hasMissingNumberedChapter(current.number, next.number);
+          setNextChapterId(hasGap ? null : chapterIds[currentIndex + 1]);
         } else {
           setNextChapterId(null);
         }
@@ -554,10 +739,15 @@ const MangaReaderPage: React.FC = () => {
         const chaptersResponse = await backend.getMangaChapters(mangaId, {
           limit: 100,
           offset: 0,
-          translatedLanguage: ['en']
+          language: chapterFilters.language,
+          scanlationGroup: chapterFilters.scanlationGroup,
         });
 
-        const loadedChapterIds = chaptersResponse.data.map((ch: any) => ch.id);
+        const loadedChapters = chaptersResponse.data.map((chapter: any) => ({
+          id: chapter.id,
+          number: String(readResponseField(chapter, 'chapter') ?? ''),
+        }));
+        const loadedChapterIds = loadedChapters.map((chapter) => chapter.id);
         const currentIndex = loadedChapterIds.indexOf(chapterId);
 
         if (currentIndex > 0) {
@@ -567,7 +757,8 @@ const MangaReaderPage: React.FC = () => {
         }
 
         if (currentIndex >= 0 && currentIndex < loadedChapterIds.length - 1) {
-          setNextChapterId(loadedChapterIds[currentIndex + 1]);
+          const hasGap = chapterFilters.scanlationGroup !== 'all' && hasMissingNumberedChapter(loadedChapters[currentIndex].number, loadedChapters[currentIndex + 1].number);
+          setNextChapterId(hasGap ? null : loadedChapterIds[currentIndex + 1]);
         } else {
           setNextChapterId(null);
         }
@@ -580,7 +771,7 @@ const MangaReaderPage: React.FC = () => {
     };
 
     loadChapters();
-  }, [backend, mangaId, chapterId, chapterIds]);
+  }, [backend, mangaId, chapterId, chapterIds, chapterNavigation, chapterFilters.language, chapterFilters.scanlationGroup]);
 
   useEffect(() => {
     if (loadedPagesCount === 0 || resumePage < 1 || hasScrolledToResume.current || !progressResolvedRef.current) {
@@ -592,14 +783,32 @@ const MangaReaderPage: React.FC = () => {
       return;
     }
 
-    targetElement.scrollIntoView({ behavior: 'auto', block: 'start' });
+    if (readingMode === 'vertical') {
+      targetElement.scrollIntoView({ behavior: 'auto', block: 'start' });
+    }
     currentPageRef.current = resumePage;
+    setActivePage(resumePage);
     hasScrolledToResume.current = true;
     persistPage(resumePage);
-  }, [loadedPagesCount, persistPage, resumePage]);
+  }, [loadedPagesCount, persistPage, readingMode, resumePage]);
+
+  // Pages arrive progressively through the stream. In paged layouts, retain
+  // the stream so neighbouring pages keep loading, but show only the active
+  // page. Continuous vertical reading leaves every page visible as before.
+  useEffect(() => {
+    pageElementsRef.current.forEach((pageElement, index) => {
+      if (!pageElement) return;
+      const pageIndex = Number(pageElement.dataset.pageIndex);
+      const pageNumber = Number.isInteger(pageIndex) ? pageIndex + 1 : index + 1;
+      const shouldShow = readingMode === 'vertical' || pageNumber === activePage;
+      pageElement.style.display = shouldShow ? 'block' : 'none';
+      pageElement.style.marginBottom = readingMode === 'vertical' ? '1rem' : '0';
+      pageElement.style.minHeight = readingMode === 'vertical' ? '0' : 'min(70vh, 900px)';
+    });
+  }, [activePage, loadedPagesCount, readingMode, renderedPagesCount]);
 
   useEffect(() => {
-    if (renderedPagesCount === 0) {
+    if (readingMode !== 'vertical' || renderedPagesCount === 0) {
       return;
     }
 
@@ -627,6 +836,7 @@ const MangaReaderPage: React.FC = () => {
       });
 
       currentPageRef.current = currentPage.page;
+      setActivePage(currentPage.page);
       if (hasScrolledToResume.current) {
         persistPage(currentPage.page);
       }
@@ -649,7 +859,28 @@ const MangaReaderPage: React.FC = () => {
       window.removeEventListener('scroll', requestTracking);
       window.removeEventListener('resize', requestTracking);
     };
-  }, [persistPage, renderedPagesCount]);
+  }, [persistPage, readingMode, renderedPagesCount]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('button, a, input, select, textarea')) {
+        return;
+      }
+
+      const goesNext = readingMode === 'rtl' ? event.key === 'ArrowLeft' : event.key === 'ArrowRight' || (readingMode === 'vertical' && event.key === 'ArrowDown');
+      const goesPrevious = readingMode === 'rtl' ? event.key === 'ArrowRight' : event.key === 'ArrowLeft' || (readingMode === 'vertical' && event.key === 'ArrowUp');
+      if (!goesNext && !goesPrevious) {
+        return;
+      }
+
+      event.preventDefault();
+      moveReaderPage(goesNext ? 1 : -1);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [moveReaderPage, readingMode]);
 
   // Queue the exact active chapter position before leaving it. The queue
   // serializes writes so it cannot be overwritten by an earlier page request.
@@ -724,6 +955,67 @@ const MangaReaderPage: React.FC = () => {
     );
   }
 
+  const handleReaderTap = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest('button, a, input, select, textarea')) {
+      return;
+    }
+
+    if (readingMode === 'vertical') {
+      moveReaderPage(event.clientY >= window.innerHeight / 2 ? 1 : -1);
+      return;
+    }
+
+    const tappedRight = event.clientX >= window.innerWidth / 2;
+    const goesNext = readingMode === 'ltr' ? tappedRight : !tappedRight;
+    moveReaderPage(goesNext ? 1 : -1);
+  };
+
+  const PageNavigation = () => {
+    const previousPage = activePage - 1;
+    const nextPage = activePage + 1;
+    const previousLabel = readingMode === 'rtl' ? '→ Previous Page' : '← Previous Page';
+    const nextLabel = readingMode === 'rtl' ? 'Next Page ←' : 'Next Page →';
+    const canGoPrevious = readingMode === 'vertical'
+      ? isPageLoaded(previousPage)
+      : !pagedPageLoading && previousPage >= 1;
+    const canGoNext = readingMode === 'vertical'
+      ? isPageLoaded(nextPage)
+      : !pagedPageLoading && (chapterPageCountRef.current === 0 || nextPage <= chapterPageCountRef.current);
+
+    return (
+      <div className="d-flex align-items-center justify-content-between gap-2 mb-3" aria-label="Page navigation">
+        <Button variant="outline-secondary" disabled={!canGoPrevious} onClick={() => moveReaderPage(-1)}>
+          {previousLabel}
+        </Button>
+        {readingMode !== 'vertical' && (
+          <div className="d-flex align-items-center justify-content-center flex-grow-1">
+            <Form.Select
+              aria-label="Select page"
+              value={pageSelection}
+              disabled={pagedPageLoading}
+              onChange={(event) => {
+                const selectedPage = Number(event.target.value);
+                setPageSelection(event.target.value);
+                if (Number.isInteger(selectedPage) && selectedPage >= 1 && selectedPage <= chapterPageCountRef.current) {
+                  void loadPagedPage(selectedPage);
+                }
+              }}
+              style={{ width: '10rem' }}
+            >
+              {Array.from({ length: chapterPageCountRef.current }, (_, index) => {
+                const page = index + 1;
+                return <option key={page} value={page}>Page {page} of {chapterPageCountRef.current}</option>;
+              })}
+            </Form.Select>
+          </div>
+        )}
+        <Button variant="outline-secondary" disabled={!canGoNext} onClick={() => moveReaderPage(1)}>
+          {nextLabel}
+        </Button>
+      </div>
+    );
+  };
 
   const ChapterNavigation = () => (
     <div className="d-flex justify-content-between gap-2 mb-3">
@@ -733,7 +1025,7 @@ const MangaReaderPage: React.FC = () => {
         onClick={() => {
           if (prevChapterId) {
             navigate(`/manga/${mangaId}/chapter/${prevChapterId}`, {
-              state: { chapterIds }
+              state: { chapterIds, chapterNavigation, chapterFilters }
             });
           }
         }}
@@ -746,7 +1038,7 @@ const MangaReaderPage: React.FC = () => {
         onClick={() => {
           if (nextChapterId) {
             navigate(`/manga/${mangaId}/chapter/${nextChapterId}`, {
-              state: { chapterIds }
+              state: { chapterIds, chapterNavigation, chapterFilters }
             });
           }
         }}
@@ -760,22 +1052,54 @@ const MangaReaderPage: React.FC = () => {
     <div className="p-3">
       <ReaderHeader />
 
-      <ChapterNavigation />
-
       {saveStatus && <div className="text-muted mb-2">{saveStatus}</div>}
 
-      {/* Container for pages - pages are appended via DOM manipulation */}
-      <div
-        ref={containerRef}
-        className="d-flex flex-column align-items-center"
-        style={{ gap: '1rem' }}
-      />
+      {readingMode !== 'vertical' && <PageNavigation />}
+
+      {readingMode === 'vertical' ? (
+        <div
+          ref={containerRef}
+          className="d-flex flex-column align-items-center"
+          style={{ gap: '1rem' }}
+          onClick={handleReaderTap}
+        />
+      ) : (
+        <div
+          className="d-flex flex-column align-items-center justify-content-center"
+          style={{ minHeight: 'min(70vh, 900px)' }}
+          onClick={handleReaderTap}
+        >
+          {pagedPageLoading && (
+            <div className="text-muted mb-3" role="status">
+              <Spinner animation="border" size="sm" className="me-2" />
+              Loading page {activePage}…
+            </div>
+          )}
+          {pagedPageError && <div className="text-danger">{pagedPageError}</div>}
+          {pagedPageUrl && !pagedPageError && (
+            <img
+              src={pagedPageUrl}
+              alt={`Chapter page ${activePage}`}
+              style={{ width: '100%', maxWidth: '980px', display: pagedPageLoading ? 'none' : 'block' }}
+              onLoad={() => {
+                setPagedPageLoading(false);
+                hasScrolledToResume.current = true;
+                persistPage(activePage);
+              }}
+              onError={() => {
+                setPagedPageLoading(false);
+                setPagedPageError(`Unable to display page ${activePage}.`);
+              }}
+            />
+          )}
+        </div>
+      )}
 
       {loadedPagesCount === 0 && !isLoading && (
         <div>No pages found for this chapter.</div>
       )}
 
-      {loadedPagesCount > 0 && <ChapterNavigation />}
+      <ChapterNavigation />
     </div>
   );
 };
