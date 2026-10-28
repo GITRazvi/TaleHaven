@@ -151,15 +151,43 @@ const LibraryPage: React.FC = () => {
 	const background = imageStyle?.backgroundImage || paletteBackground;
     const previousBodyBackground = document.body.style.background;
     const previousBodyBackgroundColor = document.body.style.backgroundColor;
+    const previousBodyBackgroundImage = document.body.style.backgroundImage;
+    const previousBodyBackgroundSize = document.body.style.backgroundSize;
+    const previousBodyBackgroundPosition = document.body.style.backgroundPosition;
+    const previousBodyBackgroundAttachment = document.body.style.backgroundAttachment;
     const previousDocumentBackground = document.documentElement.style.background;
     const previousDocumentBackgroundColor = document.documentElement.style.backgroundColor;
+    const previousDocumentBackgroundImage = document.documentElement.style.backgroundImage;
+    const previousDocumentBackgroundSize = document.documentElement.style.backgroundSize;
+    const previousDocumentBackgroundPosition = document.documentElement.style.backgroundPosition;
+    const previousDocumentBackgroundAttachment = document.documentElement.style.backgroundAttachment;
     document.body.style.background = background;
     document.documentElement.style.background = background;
+    if (imageStyle?.backgroundImage) {
+      document.body.classList.add("scoped-theme-image-active");
+      document.body.style.backgroundImage = imageStyle.backgroundImage;
+      document.body.style.backgroundSize = "cover";
+      document.body.style.backgroundPosition = "center";
+      document.body.style.backgroundAttachment = "fixed";
+      document.documentElement.style.backgroundImage = imageStyle.backgroundImage;
+      document.documentElement.style.backgroundSize = "cover";
+      document.documentElement.style.backgroundPosition = "center";
+      document.documentElement.style.backgroundAttachment = "fixed";
+    }
     return () => {
+      document.body.classList.remove("scoped-theme-image-active");
       document.body.style.background = previousBodyBackground;
       document.body.style.backgroundColor = previousBodyBackgroundColor;
+      document.body.style.backgroundImage = previousBodyBackgroundImage;
+      document.body.style.backgroundSize = previousBodyBackgroundSize;
+      document.body.style.backgroundPosition = previousBodyBackgroundPosition;
+      document.body.style.backgroundAttachment = previousBodyBackgroundAttachment;
       document.documentElement.style.background = previousDocumentBackground;
       document.documentElement.style.backgroundColor = previousDocumentBackgroundColor;
+      document.documentElement.style.backgroundImage = previousDocumentBackgroundImage;
+      document.documentElement.style.backgroundSize = previousDocumentBackgroundSize;
+      document.documentElement.style.backgroundPosition = previousDocumentBackgroundPosition;
+      document.documentElement.style.backgroundAttachment = previousDocumentBackgroundAttachment;
     };
   }, [displayTheme, customThemeColor, profileThemeImageUrl]);
 
@@ -362,7 +390,7 @@ const LibraryPage: React.FC = () => {
   const showProfileContent = !error || isUsingFallback;
 
   return (
-    <Container className={`py-5 profile-display-theme profile-theme-${displayTheme}`} style={profileThemeStyle}>
+    <Container className={`py-5 profile-display-theme profile-theme-${displayTheme}${profileThemeImageUrl ? " theme-has-image" : ""}`} style={profileThemeStyle}>
       <Card className="mb-4 profile-identity-card shadow-sm">
         <Card.Body className="p-4 d-flex flex-wrap align-items-center gap-3">
           {profileImageUrl ? (

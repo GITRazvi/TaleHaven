@@ -1,20 +1,31 @@
 import React, { useEffect, useState } from 'react';
-import { Navbar, Nav, Container, Form, FormControl, Button, NavDropdown } from 'react-bootstrap';
+import { Navbar, Nav, Container, Form, FormControl, Button, NavDropdown, Offcanvas } from 'react-bootstrap';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import GuidedRecommendationChat from '../home/guided-recommendation-chat';
 
 interface NavbarProps {
     searchQuery: string;
     setSearchQuery: React.Dispatch<React.SetStateAction<string>>;
+    siteTheme: string;
+    siteThemeStyle?: React.CSSProperties;
+    hasSiteThemeImage: boolean;
 }
 
-const HorizontalNavbar: React.FC<NavbarProps> = ({ searchQuery, setSearchQuery }) => {
+const HorizontalNavbar: React.FC<NavbarProps> = ({
+    searchQuery,
+    setSearchQuery,
+    siteTheme,
+    siteThemeStyle,
+    hasSiteThemeImage,
+}) => {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
     const [darkMode, setDarkMode] = useState<boolean>(() => {
         const saved = localStorage.getItem('darkMode');
         return saved ? JSON.parse(saved) : true; // Default to dark mode
     });
+    const [showRecommendations, setShowRecommendations] = useState(false);
 
     useEffect(() => {
         localStorage.setItem('darkMode', JSON.stringify(darkMode));
@@ -58,6 +69,7 @@ const HorizontalNavbar: React.FC<NavbarProps> = ({ searchQuery, setSearchQuery }
                     <Nav className="me-auto">
                         <Nav.Link as={Link} to="/">Home</Nav.Link>
                         <Nav.Link as={Link} to="/manga/search">Manga</Nav.Link>
+                        <Nav.Link as="button" className="nav-recommendations-link" onClick={() => setShowRecommendations(true)}>Chatbot</Nav.Link>
                         {user && <Nav.Link as={Link} to="/chat">Chatrooms</Nav.Link>}
                     </Nav>
                     <Form className="d-flex align-items-center" onSubmit={handleSearchSubmit}>
@@ -119,6 +131,20 @@ const HorizontalNavbar: React.FC<NavbarProps> = ({ searchQuery, setSearchQuery }
                     </Form>
                 </Navbar.Collapse>
             </Container>
+            <Offcanvas
+                show={showRecommendations}
+                onHide={() => setShowRecommendations(false)}
+                placement="end"
+                className={`recommendation-offcanvas chatbot-theme site-theme-${siteTheme}${hasSiteThemeImage ? ' theme-has-image' : ''}`}
+                style={siteThemeStyle}
+            >
+                <Offcanvas.Header closeButton>
+                    <Offcanvas.Title>Chatbot</Offcanvas.Title>
+                </Offcanvas.Header>
+                <Offcanvas.Body>
+                    <GuidedRecommendationChat />
+                </Offcanvas.Body>
+            </Offcanvas>
         </Navbar>
     );
 };

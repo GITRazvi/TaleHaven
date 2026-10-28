@@ -251,10 +251,17 @@ export type User = {
   displayTheme: DisplayTheme;
   customThemeColor: string;
 	  themeImagePath: string;
+  siteTheme: DisplayTheme;
+  siteCustomColor: string;
+	  siteThemeImagePaths: string[];
+	  siteThemeImageRotationMode: SiteThemeImageRotationMode;
+	  siteThemeImageRotationMinutes: number;
   created_at: string;
 };
 
 export type DisplayTheme = 'midnight' | 'forest' | 'plum' | 'ember' | 'parchment';
+
+export type SiteThemeImageRotationMode = 'static' | 'refresh' | 'session' | 'interval';
 
 export type RegisterRequest = {
   email: string;
@@ -326,8 +333,10 @@ export type ChatMessage = {
   roomId: number;
   userId: number;
   authorDisplayName: string;
+  profileImagePath: string;
   body: string;
   imagePath: string;
+  replyToMessageId: number;
   createdAt: string;
 };
 
@@ -381,6 +390,13 @@ export type UpdateProfileThemeRequest = {
   customThemeColor?: string;
 };
 
+export type UpdateSiteThemeRequest = {
+  siteTheme: DisplayTheme;
+  siteCustomColor?: string;
+	  siteThemeImageRotationMode: SiteThemeImageRotationMode;
+	  siteThemeImageRotationMinutes: number;
+};
+
 export type AuthErrorResponse = {
   error: string;
   message: string;
@@ -423,10 +439,12 @@ export type AniListDiscoverySection = 'trending' | 'popular' | 'top-rated' | 're
 export type AniListMangaSearchParams = {
   title?: string;
   genre?: string;
+  genres?: string[];
   tag?: string;
   year?: number;
   format?: string;
   status?: string;
+  staffId?: number;
   sort?: string;
   page?: number;
   perPage?: number;

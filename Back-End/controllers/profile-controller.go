@@ -17,7 +17,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const maxProfilePhotoBytes int64 = 5 * 1024 * 1024
+const (
+	maxProfilePhotoBytes int64 = 5 * 1024 * 1024
+	maxSiteThemeImages         = 10
+)
 
 // ProfileController exposes the authenticated user's editable presentation
 // profile. Account security and reader preferences remain under /auth and
@@ -29,6 +32,9 @@ func ProfileController(router *gin.Engine) {
 		routes.GET("", getProfile)
 		routes.PATCH("", updateProfile)
 		routes.PATCH("/theme", updateProfileTheme)
+		routes.PATCH("/site-theme", updateSiteTheme)
+		routes.POST("/site-theme-images", uploadSiteThemeImages)
+		routes.DELETE("/site-theme-images", removeSiteThemeImage)
 		routes.POST("/theme-image", uploadProfileThemeImage)
 		routes.DELETE("/theme-image", removeProfileThemeImage)
 		routes.POST("/photo", uploadProfilePhoto)
@@ -98,6 +104,161 @@ func updateProfileTheme(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Display theme update failed"})
 		return
 	}
+	c.JSON(http.StatusOK, gin.H{"user": toUserResponse(updated)})
+}
+
+func updateSiteTheme(c *gin.Context) {
+	user, ok := profileUser(c)
+	if !ok {
+		return
+	}
+	var request struct {
+		SiteTheme                     string `json:"siteTheme"`
+		SiteCustomColor               string `json:"siteCustomColor"`
+		SiteThemeImageRotationMode    string `json:"siteThemeImageRotationMode"`
+		SiteThemeImageRotationMinutes int    `json:"siteThemeImageRotationMinutes"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid site theme"})
+		return
+	}
+	theme := strings.ToLower(strings.TrimSpace(request.SiteTheme))
+	if !database.IsDisplayTheme(theme) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid site theme", "message": "Choose one of the available site themes."})
+		return
+	}
+	customColor, valid := database.NormalizeCustomThemeColor(request.SiteCustomColor)
+	if !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid custom site color", "message": "Choose a six-digit hexadecimal color."})
+		return
+	}
+	rotationMode := strings.ToLower(strings.TrimSpace(request.SiteThemeImageRotationMode))
+	if !database.IsSiteThemeRotationMode(rotationMode) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid site theme image rotation", "message": "Choose static, each refresh, per session, or a timed interval."})
+		return
+	}
+	if rotationMode == database.SiteThemeRotationInterval && !database.IsSiteThemeRotationMinutes(request.SiteThemeImageRotationMinutes) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid site theme image rotation interval", "message": "Choose between 1 and 1440 minutes."})
+		return
+	}
+	rotationMinutes := request.SiteThemeImageRotationMinutes
+	if rotationMinutes == 0 {
+		rotationMinutes = 15
+	}
+	updated, err := auth.UpdateUserSiteTheme(user.ID, theme, customColor, rotationMode, rotationMinutes)
+	if err != nil {
+		utils.Logger.Error("Failed to update site theme", zap.Error(err), zap.Int("user_id", user.ID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Site theme update failed"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user": toUserResponse(updated)})
+}
+
+func uploadSiteThemeImages(c *gin.Context) {
+	user, ok := profileUser(c)
+	if !ok {
+		return
+	}
+	form, err := c.MultipartForm()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid site theme images", "message": "Choose one or more JPEG, PNG, WebP, or GIF images."})
+		return
+	}
+	fileHeaders := form.File["images"]
+	if len(fileHeaders) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Site theme images are required", "message": "Choose one or more JPEG, PNG, WebP, or GIF images."})
+		return
+	}
+	if len(user.SiteThemeImagePaths)+len(fileHeaders) > maxSiteThemeImages {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Too many site theme images", "message": fmt.Sprintf("Keep up to %d site theme images.", maxSiteThemeImages)})
+		return
+	}
+	directory := filepath.Join("images", "site-themes")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		utils.Logger.Error("Failed to create site theme image directory", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Site theme image upload failed"})
+		return
+	}
+
+	newPaths := make([]string, 0, len(fileHeaders))
+	newFilePaths := make([]string, 0, len(fileHeaders))
+	for _, fileHeader := range fileHeaders {
+		if fileHeader.Size <= 0 || fileHeader.Size > maxProfilePhotoBytes {
+			removeStoredSiteThemeFiles(newFilePaths)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid site theme image", "message": "Each image must be 5 MB or smaller."})
+			return
+		}
+		file, err := fileHeader.Open()
+		if err != nil {
+			removeStoredSiteThemeFiles(newFilePaths)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid site theme image", "message": "Unable to read a selected image."})
+			return
+		}
+		contents, readErr := io.ReadAll(io.LimitReader(file, maxProfilePhotoBytes+1))
+		_ = file.Close()
+		if readErr != nil || int64(len(contents)) > maxProfilePhotoBytes {
+			removeStoredSiteThemeFiles(newFilePaths)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid site theme image", "message": "Each image must be 5 MB or smaller."})
+			return
+		}
+		extension := map[string]string{"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}[http.DetectContentType(contents)]
+		if extension == "" {
+			removeStoredSiteThemeFiles(newFilePaths)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported site theme image", "message": "Use JPEG, PNG, WebP, or GIF images."})
+			return
+		}
+		fileName := fmt.Sprintf("user-%d-%d-%d%s", user.ID, time.Now().UTC().UnixNano(), len(newPaths), extension)
+		filePath := filepath.Join(directory, fileName)
+		if err := os.WriteFile(filePath, contents, 0o644); err != nil {
+			removeStoredSiteThemeFiles(newFilePaths)
+			utils.Logger.Error("Failed to store site theme image", zap.Error(err), zap.Int("user_id", user.ID))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Site theme image upload failed"})
+			return
+		}
+		newFilePaths = append(newFilePaths, filePath)
+		newPaths = append(newPaths, "/images/site-themes/"+fileName)
+	}
+
+	updated, err := auth.UpdateUserSiteThemeImagePaths(user.ID, append(append([]string{}, user.SiteThemeImagePaths...), newPaths...))
+	if err != nil {
+		removeStoredSiteThemeFiles(newFilePaths)
+		utils.Logger.Error("Failed to save site theme image paths", zap.Error(err), zap.Int("user_id", user.ID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Site theme image upload failed"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user": toUserResponse(updated)})
+}
+
+func removeSiteThemeImage(c *gin.Context) {
+	user, ok := profileUser(c)
+	if !ok {
+		return
+	}
+	imagePath := strings.TrimSpace(c.Query("path"))
+	if imagePath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Site theme image path is required"})
+		return
+	}
+	remaining := make([]string, 0, len(user.SiteThemeImagePaths))
+	found := false
+	for _, knownPath := range user.SiteThemeImagePaths {
+		if knownPath == imagePath {
+			found = true
+			continue
+		}
+		remaining = append(remaining, knownPath)
+	}
+	if !found {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Site theme image not found"})
+		return
+	}
+	updated, err := auth.UpdateUserSiteThemeImagePaths(user.ID, remaining)
+	if err != nil {
+		utils.Logger.Error("Failed to remove site theme image", zap.Error(err), zap.Int("user_id", user.ID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Site theme image removal failed"})
+		return
+	}
+	removeStoredSiteThemeImage(imagePath)
 	c.JSON(http.StatusOK, gin.H{"user": toUserResponse(updated)})
 }
 
@@ -175,7 +336,7 @@ func uploadProfileThemeImage(c *gin.Context) {
 	}
 	fileHeader, err := c.FormFile("image")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Theme image is required", "message": "Choose a JPEG, PNG, or WebP image."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Theme image is required", "message": "Choose a JPEG, PNG, WebP, or GIF image."})
 		return
 	}
 	if fileHeader.Size <= 0 || fileHeader.Size > maxProfilePhotoBytes {
@@ -193,9 +354,9 @@ func uploadProfileThemeImage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid theme image", "message": "Theme images must be 5 MB or smaller."})
 		return
 	}
-	extension := map[string]string{"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}[http.DetectContentType(contents)]
+	extension := map[string]string{"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}[http.DetectContentType(contents)]
 	if extension == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported theme image", "message": "Use a JPEG, PNG, or WebP image."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported theme image", "message": "Use a JPEG, PNG, WebP, or GIF image."})
 		return
 	}
 	directory := filepath.Join("images", "profile-themes")
@@ -273,5 +434,27 @@ func removeStoredProfileThemeImage(imagePath string) {
 	}
 	if err := os.Remove(filepath.Join("images", "profile-themes", fileName)); err != nil && !os.IsNotExist(err) {
 		utils.Logger.Warn("Failed to remove replaced profile theme image", zap.Error(err))
+	}
+}
+
+func removeStoredSiteThemeImage(imagePath string) {
+	const publicPrefix = "/images/site-themes/"
+	if !strings.HasPrefix(imagePath, publicPrefix) {
+		return
+	}
+	fileName := strings.TrimPrefix(imagePath, publicPrefix)
+	if fileName == "" || filepath.Base(fileName) != fileName {
+		return
+	}
+	if err := os.Remove(filepath.Join("images", "site-themes", fileName)); err != nil && !os.IsNotExist(err) {
+		utils.Logger.Warn("Failed to remove site theme image", zap.Error(err))
+	}
+}
+
+func removeStoredSiteThemeFiles(filePaths []string) {
+	for _, filePath := range filePaths {
+		if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+			utils.Logger.Warn("Failed to remove unpersisted site theme image", zap.Error(err))
+		}
 	}
 }

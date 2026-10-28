@@ -33,13 +33,47 @@ func TestChatRoomsKeepInviteOnlyRoomsPrivateAndMessagesMemberScoped(t *testing.T
 	if err != nil || !joined {
 		t.Fatalf("join public room = (%t, %v), want (true, nil)", joined, err)
 	}
-	message, err := CreateChatMessage(publicRoom.ID, visitorID, "Hello public room", "/images/chat/messages/public.png")
+	if _, err := DB.Exec(`UPDATE users SET profile_image_path = $1 WHERE id = $2`, "/images/profiles/chat-visitor.png", visitorID); err != nil {
+		t.Fatalf("set visitor profile image: %v", err)
+	}
+	message, err := CreateChatMessage(publicRoom.ID, visitorID, "Hello public room", "/images/chat/messages/public.png", 0)
 	if err != nil || message.Body != "Hello public room" || message.ImagePath != "/images/chat/messages/public.png" {
 		t.Fatalf("create public message = (%#v, %v)", message, err)
 	}
 	messages, err := GetChatMessages(publicRoom.ID, ownerID, 10)
-	if err != nil || len(messages) != 1 || messages[0].Body != "Hello public room" {
+	if err != nil || len(messages) != 1 || messages[0].Body != "Hello public room" || messages[0].ProfileImagePath != "/images/profiles/chat-visitor.png" {
 		t.Fatalf("owner messages = (%#v, %v)", messages, err)
+	}
+	deletedImagePath, err := DeleteChatMessage(publicRoom.ID, visitorID, message.ID)
+	if err != nil || deletedImagePath != message.ImagePath {
+		t.Fatalf("delete own message = (%q, %v), want (%q, nil)", deletedImagePath, err, message.ImagePath)
+	}
+	messages, err = GetChatMessages(publicRoom.ID, ownerID, 10)
+	if err != nil || len(messages) != 0 {
+		t.Fatalf("messages after deletion = (%#v, %v), want none", messages, err)
+	}
+	ownerMessage, err := CreateChatMessage(publicRoom.ID, ownerID, "Owner message", "", 0)
+	if err != nil {
+		t.Fatalf("create owner message: %v", err)
+	}
+	if _, err := DeleteChatMessage(publicRoom.ID, visitorID, ownerMessage.ID); !errors.Is(err, ErrChatRoomAccess) {
+		t.Fatalf("delete another member's message = %v, want access denied", err)
+	}
+	reply, err := CreateChatMessage(publicRoom.ID, visitorID, "Replying to the owner", "", ownerMessage.ID)
+	if err != nil || reply.ReplyToMessageID != ownerMessage.ID {
+		t.Fatalf("create reply = (%#v, %v)", reply, err)
+	}
+	if _, err := CreateChatMessage(publicRoom.ID, visitorID, "Cross-room reply", "", 999999); !errors.Is(err, ErrChatMessageReplyTarget) {
+		t.Fatalf("invalid reply target error = %v, want %v", err, ErrChatMessageReplyTarget)
+	}
+	if err := ReportChatMessage(publicRoom.ID, ownerMessage.ID, visitorID, "Harassment"); err != nil {
+		t.Fatalf("report another member's message: %v", err)
+	}
+	if err := ReportChatMessage(publicRoom.ID, ownerMessage.ID, visitorID, "Duplicate report"); !errors.Is(err, ErrChatMessageAlreadyReported) {
+		t.Fatalf("duplicate report = %v, want already reported", err)
+	}
+	if err := ReportChatMessage(publicRoom.ID, ownerMessage.ID, ownerID, "Self report"); !errors.Is(err, ErrChatMessageReportDenied) {
+		t.Fatalf("report own message = %v, want denied", err)
 	}
 
 	privateRoom, err := CreateChatRoom(ownerID, "Invite room "+suffix, ChatRoomInviteOnly)
@@ -60,7 +94,7 @@ func TestChatRoomsKeepInviteOnlyRoomsPrivateAndMessagesMemberScoped(t *testing.T
 	if err != nil || !joined || roomID != privateRoom.ID {
 		t.Fatalf("join invite-only room = (%d, %t, %v)", roomID, joined, err)
 	}
-	if _, err := CreateChatMessage(privateRoom.ID, visitorID, "Hello invite room", ""); err != nil {
+	if _, err := CreateChatMessage(privateRoom.ID, visitorID, "Hello invite room", "", 0); err != nil {
 		t.Fatalf("visitor message after invite: %v", err)
 	}
 }

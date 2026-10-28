@@ -45,6 +45,8 @@ func ChatController(router *gin.Engine) {
 		routes.GET("/rooms/:roomID/messages", getChatMessages)
 		routes.POST("/rooms/:roomID/messages", postChatMessage)
 		routes.POST("/rooms/:roomID/messages/image", postChatImageMessage)
+		routes.DELETE("/rooms/:roomID/messages/:messageID", deleteChatMessage)
+		routes.POST("/rooms/:roomID/messages/:messageID/report", reportChatMessage)
 		routes.POST("/rooms/:roomID/invites", createChatRoomInvite)
 		routes.POST("/invites/:token/join", joinChatRoomInvite)
 	}
@@ -56,7 +58,12 @@ type createChatRoomRequest struct {
 }
 
 type postChatMessageRequest struct {
-	Body string `json:"body"`
+	Body             string `json:"body"`
+	ReplyToMessageID int64  `json:"replyToMessageId"`
+}
+
+type reportChatMessageRequest struct {
+	Reason string `json:"reason"`
 }
 
 type updateChatRoomVisibilityRequest struct {
@@ -267,7 +274,11 @@ func postChatMessage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid message", "message": "Messages must be between 1 and 2,000 characters."})
 		return
 	}
-	message, err := database.CreateChatMessage(roomID, userID, body, "")
+	message, err := database.CreateChatMessage(roomID, userID, body, "", request.ReplyToMessageID)
+	if errors.Is(err, database.ErrChatMessageReplyTarget) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid reply target"})
+		return
+	}
 	if errors.Is(err, database.ErrChatRoomAccess) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Chat room access denied"})
 		return
@@ -277,7 +288,73 @@ func postChatMessage(c *gin.Context) {
 		return
 	}
 	message.AuthorDisplayName = chatDisplayName(c)
+	message.ProfileImagePath = chatProfileImagePath(c)
 	c.JSON(http.StatusCreated, gin.H{"result": "ok", "message": message})
+}
+
+func deleteChatMessage(c *gin.Context) {
+	userID, ok := chatUserID(c)
+	if !ok {
+		return
+	}
+	roomID, valid := chatRoomID(c)
+	if !valid {
+		return
+	}
+	messageID, valid := chatMessageID(c)
+	if !valid {
+		return
+	}
+	imagePath, err := database.DeleteChatMessage(roomID, userID, messageID)
+	if errors.Is(err, database.ErrChatRoomAccess) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Message deletion denied", "message": "You can only delete your own messages in this chatroom."})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to delete message"})
+		return
+	}
+	removeStoredChatMessageImage(imagePath)
+	c.JSON(http.StatusOK, gin.H{"result": "ok", "message": "Message deleted"})
+}
+
+func reportChatMessage(c *gin.Context) {
+	userID, ok := chatUserID(c)
+	if !ok {
+		return
+	}
+	roomID, valid := chatRoomID(c)
+	if !valid {
+		return
+	}
+	messageID, valid := chatMessageID(c)
+	if !valid {
+		return
+	}
+	var request reportChatMessageRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid report reason"})
+		return
+	}
+	reason := strings.TrimSpace(request.Reason)
+	if reason == "" || utf8.RuneCountInString(reason) > 500 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid report reason", "message": "Give a reason between 1 and 500 characters."})
+		return
+	}
+	err := database.ReportChatMessage(roomID, messageID, userID, reason)
+	if errors.Is(err, database.ErrChatMessageAlreadyReported) {
+		c.JSON(http.StatusConflict, gin.H{"error": "Message already reported"})
+		return
+	}
+	if errors.Is(err, database.ErrChatRoomAccess) || errors.Is(err, database.ErrChatMessageReportDenied) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Message report denied"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to report message"})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"result": "ok", "message": "Report submitted"})
 }
 
 // uploadChatRoomImage lets only the room owner replace the room cover shown in
@@ -304,7 +381,7 @@ func uploadChatRoomImage(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Only the room owner can change the room image"})
 		return
 	}
-	contents, extension, err := chatImageContents(c, "image")
+	contents, extension, err := chatImageContents(c, "image", false)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid room image", "message": err.Error()})
 		return
@@ -356,7 +433,7 @@ func uploadChatRoomThemeImage(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Only the room owner can change the theme image"})
 		return
 	}
-	contents, extension, err := chatImageContents(c, "image")
+	contents, extension, err := chatImageContents(c, "image", true)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid theme image", "message": err.Error()})
 		return
@@ -431,7 +508,7 @@ func postChatImageMessage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid message", "message": "Messages must be 2,000 characters or shorter."})
 		return
 	}
-	contents, extension, err := chatImageContents(c, "image")
+	contents, extension, err := chatImageContents(c, "image", false)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid message image", "message": err.Error()})
 		return
@@ -441,9 +518,19 @@ func postChatImageMessage(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Message image upload failed"})
 		return
 	}
-	message, err := database.CreateChatMessage(roomID, userID, body, imagePath)
+	replyToMessageID, err := optionalReplyToMessageID(c.PostForm("replyToMessageId"))
 	if err != nil {
 		_ = os.Remove(filePath)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid reply target"})
+		return
+	}
+	message, err := database.CreateChatMessage(roomID, userID, body, imagePath, replyToMessageID)
+	if err != nil {
+		_ = os.Remove(filePath)
+		if errors.Is(err, database.ErrChatMessageReplyTarget) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid reply target"})
+			return
+		}
 		if errors.Is(err, database.ErrChatRoomAccess) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Chat room access denied"})
 			return
@@ -452,6 +539,7 @@ func postChatImageMessage(c *gin.Context) {
 		return
 	}
 	message.AuthorDisplayName = chatDisplayName(c)
+	message.ProfileImagePath = chatProfileImagePath(c)
 	c.JSON(http.StatusCreated, gin.H{"result": "ok", "message": message})
 }
 
@@ -522,6 +610,15 @@ func chatDisplayName(c *gin.Context) string {
 	return "Reader"
 }
 
+func chatProfileImagePath(c *gin.Context) string {
+	if user, exists := c.Get("user"); exists {
+		if safeUser, ok := user.(*database.User); ok {
+			return safeUser.ProfileImagePath
+		}
+	}
+	return ""
+}
+
 func chatRoomID(c *gin.Context) (int64, bool) {
 	roomID, err := strconv.ParseInt(c.Param("roomID"), 10, 64)
 	if err != nil || roomID < 1 {
@@ -544,6 +641,26 @@ func chatMessageLimit(c *gin.Context) (int, bool) {
 	return limit, true
 }
 
+func chatMessageID(c *gin.Context) (int64, bool) {
+	messageID, err := strconv.ParseInt(c.Param("messageID"), 10, 64)
+	if err != nil || messageID < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid message ID"})
+		return 0, false
+	}
+	return messageID, true
+}
+
+func optionalReplyToMessageID(value string) (int64, error) {
+	if strings.TrimSpace(value) == "" {
+		return 0, nil
+	}
+	replyToMessageID, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || replyToMessageID < 1 {
+		return 0, errors.New("invalid reply target")
+	}
+	return replyToMessageID, nil
+}
+
 func normalizeChatRoom(name, visibility string) (string, string, bool) {
 	name = strings.TrimSpace(name)
 	if utf8.RuneCountInString(name) < 2 || utf8.RuneCountInString(name) > 80 {
@@ -564,10 +681,10 @@ func normalizeChatVisibility(visibility string) (string, bool) {
 	return visibility, true
 }
 
-func chatImageContents(c *gin.Context, field string) ([]byte, string, error) {
+func chatImageContents(c *gin.Context, field string, allowGIF bool) ([]byte, string, error) {
 	fileHeader, err := c.FormFile(field)
 	if err != nil {
-		return nil, "", fmt.Errorf("choose a JPEG, PNG, or WebP image")
+		return nil, "", chatImageFormatError(allowGIF, "choose a")
 	}
 	if fileHeader.Size <= 0 || fileHeader.Size > maxChatImageBytes {
 		return nil, "", fmt.Errorf("images must be 5 MB or smaller")
@@ -581,15 +698,30 @@ func chatImageContents(c *gin.Context, field string) ([]byte, string, error) {
 	if err != nil || int64(len(contents)) > maxChatImageBytes {
 		return nil, "", fmt.Errorf("images must be 5 MB or smaller")
 	}
-	extension := map[string]string{
+	extension := chatImageExtension(contents, allowGIF)
+	if extension == "" {
+		return nil, "", chatImageFormatError(allowGIF, "use a")
+	}
+	return contents, extension, nil
+}
+
+func chatImageExtension(contents []byte, allowGIF bool) string {
+	extensions := map[string]string{
 		"image/jpeg": ".jpg",
 		"image/png":  ".png",
 		"image/webp": ".webp",
-	}[http.DetectContentType(contents)]
-	if extension == "" {
-		return nil, "", fmt.Errorf("use a JPEG, PNG, or WebP image")
 	}
-	return contents, extension, nil
+	if allowGIF {
+		extensions["image/gif"] = ".gif"
+	}
+	return extensions[http.DetectContentType(contents)]
+}
+
+func chatImageFormatError(allowGIF bool, prefix string) error {
+	if allowGIF {
+		return fmt.Errorf("%s JPEG, PNG, WebP, or GIF image", prefix)
+	}
+	return fmt.Errorf("%s JPEG, PNG, or WebP image", prefix)
 }
 
 func storeChatImage(contents []byte, extension, category, prefix string) (string, string, error) {
@@ -627,6 +759,18 @@ func removeStoredChatRoomThemeImage(imagePath string) {
 		return
 	}
 	_ = os.Remove(filepath.Join("images", "chat", "theme-backgrounds", fileName))
+}
+
+func removeStoredChatMessageImage(imagePath string) {
+	const publicPrefix = "/images/chat/messages/"
+	if !strings.HasPrefix(imagePath, publicPrefix) {
+		return
+	}
+	fileName := strings.TrimPrefix(imagePath, publicPrefix)
+	if fileName == "" || filepath.Base(fileName) != fileName {
+		return
+	}
+	_ = os.Remove(filepath.Join("images", "chat", "messages", fileName))
 }
 
 func newChatInviteToken() (string, string, error) {

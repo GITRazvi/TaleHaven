@@ -61,6 +61,7 @@ import {
   UserLibraryResponse,
   UpdateProfileRequest,
 	UpdateProfileThemeRequest,
+	UpdateSiteThemeRequest,
 } from "./types";
 
 type QueryValue = string | number | boolean | null | undefined;
@@ -240,15 +241,24 @@ export default class Backend {
     return this.get<ChatMessagesResponse>(`/chat/rooms/${roomId}/messages${this.buildQuery({ limit })}`);
   }
 
-  async sendChatMessage(roomId: number, body: string): Promise<SendChatMessageResponse> {
-    return this.post<SendChatMessageResponse>(`/chat/rooms/${roomId}/messages`, { body });
+  async sendChatMessage(roomId: number, body: string, replyToMessageId = 0): Promise<SendChatMessageResponse> {
+    return this.post<SendChatMessageResponse>(`/chat/rooms/${roomId}/messages`, { body, replyToMessageId });
   }
 
-  async sendChatMessageWithImage(roomId: number, body: string, image: File): Promise<SendChatMessageResponse> {
+  async sendChatMessageWithImage(roomId: number, body: string, image: File, replyToMessageId = 0): Promise<SendChatMessageResponse> {
     const formData = new FormData();
     formData.append("body", body);
     formData.append("image", image);
+    if (replyToMessageId > 0) formData.append("replyToMessageId", String(replyToMessageId));
     return this.postForm<SendChatMessageResponse>(`/chat/rooms/${roomId}/messages/image`, formData);
+  }
+
+  async deleteChatMessage(roomId: number, messageId: number): Promise<ApiMessageResponse> {
+    return this.delete<ApiMessageResponse>(`/chat/rooms/${roomId}/messages/${messageId}`);
+  }
+
+  async reportChatMessage(roomId: number, messageId: number, reason: string): Promise<ApiMessageResponse> {
+    return this.post<ApiMessageResponse>(`/chat/rooms/${roomId}/messages/${messageId}/report`, { reason });
   }
 
   async createChatInvite(roomId: number): Promise<CreateChatInviteResponse> {
@@ -277,6 +287,20 @@ export default class Backend {
 
   async updateProfileTheme(data: UpdateProfileThemeRequest): Promise<UserResponse> {
     return this.patch<UserResponse>("/profile/theme", data);
+  }
+
+  async updateSiteTheme(data: UpdateSiteThemeRequest): Promise<UserResponse> {
+    return this.patch<UserResponse>("/profile/site-theme", data);
+  }
+
+  async uploadSiteThemeImages(images: File[]): Promise<UserResponse> {
+    const formData = new FormData();
+    images.forEach((image) => formData.append("images", image));
+    return this.postForm<UserResponse>("/profile/site-theme-images", formData);
+  }
+
+  async removeSiteThemeImage(imagePath: string): Promise<UserResponse> {
+    return this.delete<UserResponse>(`/profile/site-theme-images${this.buildQuery({ path: imagePath })}`);
   }
 
   async uploadProfilePhoto(photo: File): Promise<UserResponse> {
@@ -365,10 +389,12 @@ export default class Backend {
     return this.get<AniListDiscoveryResponse>(`/anilist/manga/search${this.buildQuery({
       title: params.title,
       genre: params.genre,
+      "genres[]": params.genres,
       tag: params.tag,
       year: params.year,
       format: params.format,
       status: params.status,
+      staffId: params.staffId,
       sort: params.sort,
       page: params.page ?? 1,
       perPage: params.perPage ?? 20,

@@ -74,6 +74,8 @@ func TestAniListSearchRejectsMissingOrInvalidFiltersBeforeCallingUpstream(t *tes
 		"/anilist/manga/search?format=invalid",
 		"/anilist/manga/search?year=1800",
 		"/anilist/manga/search?year=not-a-year",
+		"/anilist/manga/search?staffId=not-an-id",
+		"/anilist/manga/search?staffId=-1",
 	} {
 		request := httptest.NewRequest(http.MethodGet, target, nil)
 		response := httptest.NewRecorder()

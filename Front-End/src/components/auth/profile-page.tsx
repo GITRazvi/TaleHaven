@@ -3,7 +3,7 @@ import { Container, Card, Button, Modal, Form, Alert, Row, Col } from 'react-boo
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import Backend from '../../app/clients/backend/backend';
-import { DisplayTheme } from '../../app/clients/backend/types';
+import { DisplayTheme, SiteThemeImageRotationMode } from '../../app/clients/backend/types';
 import { presentationThemeStyle } from '../../app/theme-style';
 
 const backend = new Backend();
@@ -59,6 +59,16 @@ const ProfilePage: React.FC = () => {
     const [useCustomThemeColor, setUseCustomThemeColor] = useState(false);
     const [themeImage, setThemeImage] = useState<File | null>(null);
     const [themeImageInputKey, setThemeImageInputKey] = useState(0);
+    const [siteTheme, setSiteTheme] = useState<DisplayTheme>('midnight');
+    const [siteCustomColor, setSiteCustomColor] = useState('#7ab4ff');
+    const [useCustomSiteColor, setUseCustomSiteColor] = useState(false);
+    const [siteThemeError, setSiteThemeError] = useState('');
+    const [siteThemeSuccess, setSiteThemeSuccess] = useState('');
+    const [savingSiteTheme, setSavingSiteTheme] = useState(false);
+    const [siteThemeImages, setSiteThemeImages] = useState<File[]>([]);
+    const [siteThemeImageInputKey, setSiteThemeImageInputKey] = useState(0);
+    const [siteThemeImageRotationMode, setSiteThemeImageRotationMode] = useState<SiteThemeImageRotationMode>('static');
+    const [siteThemeImageRotationMinutes, setSiteThemeImageRotationMinutes] = useState(15);
 
     useEffect(() => {
         if (user) {
@@ -66,6 +76,11 @@ const ProfilePage: React.FC = () => {
             setDisplayTheme(user.displayTheme || 'midnight');
             setCustomThemeColor(user.customThemeColor || '#7ab4ff');
             setUseCustomThemeColor(Boolean(user.customThemeColor));
+            setSiteTheme(user.siteTheme || 'midnight');
+            setSiteCustomColor(user.siteCustomColor || '#7ab4ff');
+            setUseCustomSiteColor(Boolean(user.siteCustomColor));
+            setSiteThemeImageRotationMode(user.siteThemeImageRotationMode || 'static');
+            setSiteThemeImageRotationMinutes(user.siteThemeImageRotationMinutes || 15);
         }
     }, [user]);
 
@@ -100,6 +115,10 @@ const ProfilePage: React.FC = () => {
         : '';
     const themeImageUrl = user.themeImagePath
         ? `${process.env.REACT_APP_API_BASE_URL ?? 'http://localhost:3001'}${user.themeImagePath}`
+        : '';
+    const siteThemeImagePaths = user.siteThemeImagePaths || [];
+    const siteThemeImageUrl = siteThemeImagePaths[0]
+        ? `${process.env.REACT_APP_API_BASE_URL ?? 'http://localhost:3001'}${siteThemeImagePaths[0]}`
         : '';
     const avatarInitial = (user.displayName || user.email).trim().charAt(0).toUpperCase() || 'R';
 
@@ -216,6 +235,41 @@ const ProfilePage: React.FC = () => {
         }
     };
 
+    const handleSaveSiteTheme = async () => {
+        setSiteThemeError('');
+        setSiteThemeSuccess('');
+        try {
+            setSavingSiteTheme(true);
+            if (siteThemeImages.length) {
+                await backend.uploadSiteThemeImages(siteThemeImages);
+                setSiteThemeImages([]);
+                setSiteThemeImageInputKey((current) => current + 1);
+            }
+            await backend.updateSiteTheme({ siteTheme, siteCustomColor: useCustomSiteColor ? siteCustomColor : '', siteThemeImageRotationMode, siteThemeImageRotationMinutes });
+            await refreshUser();
+            setSiteThemeSuccess('Site theme saved.');
+        } catch (err: any) {
+            setSiteThemeError(err?.details?.message || err?.message || 'Unable to save site theme.');
+        } finally {
+            setSavingSiteTheme(false);
+        }
+    };
+
+    const handleRemoveSiteThemeImage = async (imagePath: string) => {
+        setSiteThemeError('');
+        setSiteThemeSuccess('');
+        try {
+            setSavingSiteTheme(true);
+            await backend.removeSiteThemeImage(imagePath);
+            await refreshUser();
+            setSiteThemeSuccess('Site theme image removed.');
+        } catch (err: any) {
+            setSiteThemeError(err?.details?.message || err?.message || 'Unable to remove site theme image.');
+        } finally {
+            setSavingSiteTheme(false);
+        }
+    };
+
     const handleUploadThemeImage = async () => {
         if (!themeImage) return;
         setDisplayThemeError('');
@@ -293,7 +347,61 @@ const ProfilePage: React.FC = () => {
                 </Card.Body>
             </Card>
 
-            <Card className={`mb-4 profile-settings-card profile-theme-preview profile-theme-${displayTheme} shadow-sm`} style={presentationThemeStyle(useCustomThemeColor ? customThemeColor : undefined, themeImageUrl)}>
+            <Card className={`mb-4 profile-settings-card profile-theme-preview profile-theme-${siteTheme}${siteThemeImageUrl ? ' theme-has-image' : ''} shadow-sm`} style={presentationThemeStyle(useCustomSiteColor ? siteCustomColor : undefined, siteThemeImageUrl)}>
+                <Card.Body className="p-4">
+                    <h3 className="h5 mb-1">Site theme</h3>
+                    <p className="mb-3">Choose the palette for Home, manga browsing and search, and the chatroom browser. My Profile and an open chatroom keep their own themes.</p>
+                    {siteThemeError && <Alert variant="danger">{siteThemeError}</Alert>}
+                    {siteThemeSuccess && <Alert variant="success">{siteThemeSuccess}</Alert>}
+                    <Form.Group className="mb-3" controlId="site-display-theme">
+                        <Form.Label>Palette</Form.Label>
+                        <Form.Select value={siteTheme} onChange={(event) => { setSiteTheme(event.target.value as DisplayTheme); setUseCustomSiteColor(false); }} disabled={savingSiteTheme}>
+                            {displayThemeOptions.map((option) => <option key={option.value} value={option.value}>{option.label} — {option.description}</option>)}
+                        </Form.Select>
+                    </Form.Group>
+                    <Form.Group className="mb-3" controlId="site-custom-theme-color">
+                        <Form.Label>Custom color</Form.Label>
+                        <div className="d-flex align-items-center gap-2">
+                            <Form.Control type="color" value={siteCustomColor} disabled={savingSiteTheme} onChange={(event) => { setSiteCustomColor(event.target.value); setUseCustomSiteColor(true); }} aria-label="Custom site theme color" />
+                            <span className="font-monospace text-uppercase">{siteCustomColor}</span>
+                        </div>
+                        <Form.Text className="text-muted">Picking a color activates a custom palette for general site pages.</Form.Text>
+                    </Form.Group>
+                    <Form.Group className="mb-3" controlId="site-theme-images">
+                        <Form.Label>Site background images</Form.Label>
+                        <div className="d-flex flex-wrap align-items-center gap-2">
+                            <Form.Control key={siteThemeImageInputKey} className="theme-image-input" type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" disabled={savingSiteTheme} onChange={(event) => setSiteThemeImages(Array.from((event.target as HTMLInputElement).files || []))} />
+                        </div>
+                        <Form.Text className="text-muted">JPEG, PNG, WebP, or animated GIF up to 5 MB each; keep up to 10. GIFs play as backgrounds. A 1920 × 1080 image works best. Selected images are uploaded when you save the site theme.</Form.Text>
+                    </Form.Group>
+                    <Form.Group className="mb-3" controlId="site-theme-image-rotation">
+                        <Form.Label>Image rotation</Form.Label>
+                        <Form.Select value={siteThemeImageRotationMode} disabled={savingSiteTheme} onChange={(event) => setSiteThemeImageRotationMode(event.target.value as SiteThemeImageRotationMode)}>
+                            <option value="static">Static (first image)</option>
+                            <option value="refresh">Choose a different image on every page refresh</option>
+                            <option value="session">Choose one image per browser session</option>
+                            <option value="interval">Rotate every X minutes</option>
+                        </Form.Select>
+                        {siteThemeImageRotationMode === 'interval' && <div className="d-flex align-items-center gap-2 mt-2">
+                            <Form.Control type="number" min={1} max={1440} value={siteThemeImageRotationMinutes} disabled={savingSiteTheme} onChange={(event) => setSiteThemeImageRotationMinutes(Number(event.target.value))} aria-label="Site theme rotation interval in minutes" />
+                            <span>minutes</span>
+                        </div>}
+                        <Form.Text className="text-muted">Rotation needs at least two saved images. Timed rotation accepts 1–1440 minutes; save the site theme to apply the choice.</Form.Text>
+                    </Form.Group>
+                    {siteThemeImagePaths.length > 0 && <div className="site-theme-image-list mb-3" aria-label="Saved site background images">
+                        {siteThemeImagePaths.map((imagePath, index) => <div className="site-theme-image-item" key={imagePath}>
+                            <img src={`${process.env.REACT_APP_API_BASE_URL ?? 'http://localhost:3001'}${imagePath}`} alt={`Site background ${index + 1}`} />
+                            <Button variant="outline-secondary" size="sm" onClick={() => handleRemoveSiteThemeImage(imagePath)} disabled={savingSiteTheme}>Remove</Button>
+                        </div>)}
+                    </div>}
+                    <div className="profile-theme-swatch mb-3" aria-label={`${siteTheme} site theme preview`}>
+                        <span /><span /><span />
+                    </div>
+                    <Button onClick={handleSaveSiteTheme} disabled={savingSiteTheme}>{savingSiteTheme ? 'Saving theme...' : 'Save site theme'}</Button>
+                </Card.Body>
+            </Card>
+
+            <Card className={`mb-4 profile-settings-card profile-theme-preview profile-theme-${displayTheme}${themeImageUrl ? ' theme-has-image' : ''} shadow-sm`} style={presentationThemeStyle(useCustomThemeColor ? customThemeColor : undefined, themeImageUrl)}>
                 <Card.Body className="p-4">
                     <h3 className="h5 mb-1">My Profile display theme</h3>
                     <p className="mb-3">Choose the palette used on your My Profile page. It does not change the rest of the site.</p>
@@ -316,11 +424,11 @@ const ProfilePage: React.FC = () => {
                     <Form.Group className="mb-3" controlId="profile-theme-image">
                         <Form.Label>Theme background image</Form.Label>
                         <div className="d-flex flex-wrap align-items-center gap-2">
-                            <Form.Control key={themeImageInputKey} className="theme-image-input" type="file" accept="image/jpeg,image/png,image/webp" disabled={savingDisplayTheme} onChange={(event) => setThemeImage((event.target as HTMLInputElement).files?.[0] ?? null)} />
+                            <Form.Control key={themeImageInputKey} className="theme-image-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={savingDisplayTheme} onChange={(event) => setThemeImage((event.target as HTMLInputElement).files?.[0] ?? null)} />
                             <Button variant="outline-primary" onClick={handleUploadThemeImage} disabled={!themeImage || savingDisplayTheme}>{savingDisplayTheme ? 'Uploading…' : 'Upload image'}</Button>
                             {themeImageUrl && <Button variant="outline-secondary" onClick={handleRemoveThemeImage} disabled={savingDisplayTheme}>Remove image</Button>}
                         </div>
-                        <Form.Text className="text-muted">JPEG, PNG, or WebP up to 5 MB. A 1920 × 1080 image works best. Uploading replaces the current background.</Form.Text>
+                        <Form.Text className="text-muted">JPEG, PNG, WebP, or animated GIF up to 5 MB. GIFs play as backgrounds. A 1920 × 1080 image works best. Uploading replaces the current background.</Form.Text>
                     </Form.Group>
                     <div className="profile-theme-swatch mb-3" aria-label={`${displayTheme} theme preview`}>
                         <span /><span /><span />

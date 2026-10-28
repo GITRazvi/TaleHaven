@@ -53,29 +53,45 @@ type ChangePasswordRequest struct {
 
 // UserResponse represents the user data returned in API responses
 type UserResponse struct {
-	ID               int    `json:"id"`
-	Email            string `json:"email"`
-	Role             string `json:"role"`
-	DisplayName      string `json:"displayName"`
-	ProfileImagePath string `json:"profileImagePath"`
-	DisplayTheme     string `json:"displayTheme"`
-	CustomThemeColor string `json:"customThemeColor"`
-	ThemeImagePath   string `json:"themeImagePath"`
-	CreatedAt        string `json:"created_at"`
+	ID                            int      `json:"id"`
+	Email                         string   `json:"email"`
+	Role                          string   `json:"role"`
+	DisplayName                   string   `json:"displayName"`
+	ProfileImagePath              string   `json:"profileImagePath"`
+	DisplayTheme                  string   `json:"displayTheme"`
+	CustomThemeColor              string   `json:"customThemeColor"`
+	ThemeImagePath                string   `json:"themeImagePath"`
+	SiteTheme                     string   `json:"siteTheme"`
+	SiteCustomColor               string   `json:"siteCustomColor"`
+	SiteThemeImagePaths           []string `json:"siteThemeImagePaths"`
+	SiteThemeImageRotationSeconds int      `json:"siteThemeImageRotationSeconds"`
+	SiteThemeImageRotationMode    string   `json:"siteThemeImageRotationMode"`
+	SiteThemeImageRotationMinutes int      `json:"siteThemeImageRotationMinutes"`
+	CreatedAt                     string   `json:"created_at"`
 }
 
 // toUserResponse converts a User model to UserResponse
 func toUserResponse(user *database.User) UserResponse {
+	siteThemeImagePaths := []string(user.SiteThemeImagePaths)
+	if siteThemeImagePaths == nil {
+		siteThemeImagePaths = []string{}
+	}
 	return UserResponse{
-		ID:               user.ID,
-		Email:            user.Email,
-		Role:             user.Role,
-		DisplayName:      user.DisplayName,
-		ProfileImagePath: user.ProfileImagePath,
-		DisplayTheme:     user.DisplayTheme,
-		CustomThemeColor: user.CustomThemeColor,
-		ThemeImagePath:   user.ThemeImagePath,
-		CreatedAt:        user.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		ID:                            user.ID,
+		Email:                         user.Email,
+		Role:                          user.Role,
+		DisplayName:                   user.DisplayName,
+		ProfileImagePath:              user.ProfileImagePath,
+		DisplayTheme:                  user.DisplayTheme,
+		CustomThemeColor:              user.CustomThemeColor,
+		ThemeImagePath:                user.ThemeImagePath,
+		SiteTheme:                     user.SiteTheme,
+		SiteCustomColor:               user.SiteCustomColor,
+		SiteThemeImagePaths:           siteThemeImagePaths,
+		SiteThemeImageRotationSeconds: user.SiteThemeImageRotationSeconds,
+		SiteThemeImageRotationMode:    user.SiteThemeImageRotationMode,
+		SiteThemeImageRotationMinutes: user.SiteThemeImageRotationMinutes,
+		CreatedAt:                     user.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
 

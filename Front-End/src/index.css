@@ -953,6 +953,222 @@ body.dark-mode .admin-stat-value {
   overflow-wrap: anywhere;
 }
 
+.chat-author-name {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font-weight: 700;
+  text-align: left;
+}
+
+.chat-author-name:hover,
+.chat-author-name:focus-visible {
+  color: var(--theme-accent, #0d6efd);
+  text-decoration: underline;
+  outline: none;
+}
+
+.chat-author-preview {
+  width: 10rem;
+  overflow: hidden;
+  border: 1px solid var(--theme-border, #dce3ee);
+  border-radius: 0.6rem;
+  background: #161a21;
+}
+
+.chat-author-preview .popover-body {
+  position: relative;
+  min-height: 10rem;
+  padding: 0;
+  overflow: hidden;
+  color: #fff;
+}
+
+.chat-author-preview img,
+.chat-author-preview-fallback {
+  display: block;
+  width: 100%;
+  height: 10rem;
+  object-fit: cover;
+}
+
+.chat-author-preview-fallback {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, var(--theme-accent, #0d6efd), #19243b);
+  font-size: 3rem;
+  font-weight: 700;
+}
+
+.chat-author-preview span {
+  position: absolute;
+  inset: 0 0 auto;
+  padding: 0.45rem 0.55rem;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0));
+  color: #fff;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.guided-recommendation-chat {
+  max-width: 52rem;
+  margin-inline: auto;
+}
+
+.recommendation-offcanvas {
+  width: min(30rem, 100vw);
+}
+
+/* Bootstrap renders offcanvas panels in a portal, outside .site-theme-app.
+   Give the Chatbot its own site-theme root so its panel follows the active
+   site palette, custom color variables, and optional image background. */
+.recommendation-offcanvas.chatbot-theme {
+  background-color: var(--theme-page);
+  border-left-color: var(--theme-border);
+  color: var(--theme-text);
+}
+
+.chatbot-theme .offcanvas-header {
+  border-bottom: 1px solid var(--theme-border);
+}
+
+.chatbot-theme .offcanvas-title,
+.chatbot-theme h1,
+.chatbot-theme h2,
+.chatbot-theme h3,
+.chatbot-theme h4,
+.chatbot-theme h5,
+.chatbot-theme h6,
+.chatbot-theme strong {
+  color: var(--theme-text) !important;
+}
+
+.chatbot-theme .text-muted {
+  color: var(--theme-muted) !important;
+}
+
+.chatbot-theme .card,
+body.dark-mode .chatbot-theme .card {
+  background: var(--theme-surface);
+  border-color: var(--theme-border);
+  color: var(--theme-text);
+}
+
+.chatbot-theme .btn-outline-primary,
+body.dark-mode .chatbot-theme .btn-outline-primary {
+  color: var(--theme-accent);
+  border-color: var(--theme-accent);
+}
+
+.chatbot-theme .btn-outline-primary:hover,
+.chatbot-theme .btn-outline-primary:focus-visible,
+body.dark-mode .chatbot-theme .btn-outline-primary:hover,
+body.dark-mode .chatbot-theme .btn-outline-primary:focus-visible {
+  color: var(--theme-page);
+  background: var(--theme-accent);
+  border-color: var(--theme-accent);
+}
+
+.chatbot-theme .btn-outline-secondary,
+body.dark-mode .chatbot-theme .btn-outline-secondary {
+  color: var(--theme-muted);
+  border-color: var(--theme-border);
+}
+
+.chatbot-theme .btn-link,
+body.dark-mode .chatbot-theme .btn-link {
+  color: var(--theme-accent);
+}
+
+.chatbot-theme:not(.site-theme-parchment) .btn-close {
+  filter: invert(1) grayscale(1) brightness(2);
+}
+
+.recommendation-offcanvas .guided-recommendation-chat {
+  margin-bottom: 0;
+}
+
+.nav-recommendations-link {
+  border: 0;
+  background: transparent;
+}
+
+.recommendation-bubble {
+  width: fit-content;
+  max-width: min(100%, 38rem);
+  margin-bottom: 0.65rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.85rem;
+}
+
+.recommendation-bubble-assistant {
+  background: color-mix(in srgb, var(--theme-surface, #f7f9fc) 88%, var(--theme-accent, #0d6efd));
+  border: 1px solid var(--theme-border, #dce3ee);
+}
+
+.recommendation-bubble-reader {
+  margin-left: auto;
+  background: var(--theme-accent, #0d6efd);
+  color: #fff;
+}
+
+.recommendation-choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+}
+
+.recommendation-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+  gap: 0.75rem;
+}
+
+.recommendation-result {
+  overflow: hidden;
+  border: 1px solid var(--theme-border, #dce3ee);
+  border-radius: 0.55rem;
+  padding: 0;
+  color: inherit;
+  background: var(--theme-surface, #fff);
+  text-align: left;
+}
+
+.recommendation-result:hover,
+.recommendation-result:focus-visible {
+  border-color: var(--theme-accent, #0d6efd);
+  outline: 2px solid color-mix(in srgb, var(--theme-accent, #0d6efd) 45%, transparent);
+}
+
+.recommendation-result img,
+.recommendation-cover-fallback {
+  display: block;
+  width: 100%;
+  height: 9rem;
+  object-fit: cover;
+}
+
+.recommendation-cover-fallback {
+  display: grid;
+  place-items: center;
+  background: #dfe6f0;
+  color: #4b5563;
+  font-size: 0.75rem;
+}
+
+.recommendation-result > span:last-child {
+  display: -webkit-box;
+  padding: 0.45rem 0.5rem;
+  overflow: hidden;
+  font-size: 0.8rem;
+  font-weight: 600;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .chat-message-image {
   display: block;
   max-width: min(100%, 32rem);
@@ -987,7 +1203,8 @@ body.dark-mode .chat-message + .chat-message {
 /* Scoped profile and chatroom palettes. These deliberately use named,
    accessible themes instead of accepting arbitrary reader-supplied CSS. */
 .profile-theme-midnight,
-.chat-room-theme-midnight {
+.chat-room-theme-midnight,
+.site-theme-midnight {
   --theme-page: #111a2d;
   --theme-surface: #182640;
   --theme-surface-strong: #223657;
@@ -998,7 +1215,8 @@ body.dark-mode .chat-message + .chat-message {
 }
 
 .profile-theme-forest,
-.chat-room-theme-forest {
+.chat-room-theme-forest,
+.site-theme-forest {
   --theme-page: #10241f;
   --theme-surface: #17362d;
   --theme-surface-strong: #214b3d;
@@ -1009,7 +1227,8 @@ body.dark-mode .chat-message + .chat-message {
 }
 
 .profile-theme-plum,
-.chat-room-theme-plum {
+.chat-room-theme-plum,
+.site-theme-plum {
   --theme-page: #24162d;
   --theme-surface: #352043;
   --theme-surface-strong: #4b2e5e;
@@ -1020,7 +1239,8 @@ body.dark-mode .chat-message + .chat-message {
 }
 
 .profile-theme-ember,
-.chat-room-theme-ember {
+.chat-room-theme-ember,
+.site-theme-ember {
   --theme-page: #2a1b18;
   --theme-surface: #3b2722;
   --theme-surface-strong: #54342c;
@@ -1031,7 +1251,8 @@ body.dark-mode .chat-message + .chat-message {
 }
 
 .profile-theme-parchment,
-.chat-room-theme-parchment {
+.chat-room-theme-parchment,
+.site-theme-parchment {
   --theme-page: #f2ead9;
   --theme-surface: #fffaf0;
   --theme-surface-strong: #eee0c7;
@@ -1039,6 +1260,143 @@ body.dark-mode .chat-message + .chat-message {
   --theme-text: #34291e;
   --theme-muted: #705f4d;
   --theme-accent: #8a5829;
+}
+
+/* The site palette is intentionally scoped below the navbar. Profile and open
+   chatroom pages provide their own theme roots and continue to override it. */
+.site-theme-app {
+  min-height: calc(100vh - 56px);
+  padding: 0.01px 0;
+  background: linear-gradient(145deg, var(--theme-page), var(--theme-surface-strong));
+  color: var(--theme-text);
+}
+
+.site-theme-app.theme-has-image {
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+
+/* Profile and open-chatroom images live on the document while active, so the
+   artwork continues through the outer page area rather than being clipped to
+   their centered content containers. */
+body.scoped-theme-image-active .site-theme-app {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+body.scoped-theme-image-active .profile-display-theme.theme-has-image,
+body.scoped-theme-image-active .chat-room-page.theme-has-image {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+.site-theme-app .card,
+body.dark-mode .site-theme-app .card {
+  background: var(--theme-surface);
+  border-color: var(--theme-border);
+  color: var(--theme-text);
+}
+
+.site-theme-app .list-group-item,
+body.dark-mode .site-theme-app .list-group-item {
+  background: var(--theme-surface);
+  border-color: var(--theme-border);
+  color: var(--theme-text) !important;
+}
+
+.site-theme-app .list-group-item:hover,
+body.dark-mode .site-theme-app .list-group-item:hover {
+  background: var(--theme-surface-strong);
+  color: var(--theme-text) !important;
+}
+
+.site-theme-app h1,
+.site-theme-app h2,
+.site-theme-app h3,
+.site-theme-app h4,
+.site-theme-app h5,
+.site-theme-app h6,
+.site-theme-app strong,
+body.dark-mode .site-theme-app h1,
+body.dark-mode .site-theme-app h2,
+body.dark-mode .site-theme-app h3,
+body.dark-mode .site-theme-app h4,
+body.dark-mode .site-theme-app h5,
+body.dark-mode .site-theme-app h6,
+body.dark-mode .site-theme-app strong {
+  color: var(--theme-text) !important;
+}
+
+.site-theme-app .text-muted,
+body.dark-mode .site-theme-app .text-muted {
+  color: var(--theme-muted) !important;
+}
+
+.site-theme-app a,
+body.dark-mode .site-theme-app a {
+  color: var(--theme-accent);
+}
+
+.site-theme-app input,
+.site-theme-app select,
+.site-theme-app textarea,
+body.dark-mode .site-theme-app input,
+body.dark-mode .site-theme-app select,
+body.dark-mode .site-theme-app textarea {
+  background: var(--theme-surface-strong);
+  border-color: var(--theme-border);
+  color: var(--theme-text) !important;
+}
+
+.site-theme-app input::placeholder,
+.site-theme-app textarea::placeholder {
+  color: var(--theme-muted);
+}
+
+.site-theme-app input:focus,
+.site-theme-app select:focus,
+.site-theme-app textarea:focus,
+body.dark-mode .site-theme-app input:focus,
+body.dark-mode .site-theme-app select:focus,
+body.dark-mode .site-theme-app textarea:focus {
+  background: var(--theme-surface-strong);
+  border-color: var(--theme-accent);
+  color: var(--theme-text) !important;
+  box-shadow: 0 0 0 0.2rem color-mix(in srgb, var(--theme-accent) 28%, transparent);
+}
+
+.site-theme-app .btn-outline-primary,
+body.dark-mode .site-theme-app .btn-outline-primary {
+  color: var(--theme-accent);
+  border-color: var(--theme-accent);
+}
+
+.site-theme-app .btn-outline-primary:hover,
+body.dark-mode .site-theme-app .btn-outline-primary:hover {
+  color: var(--theme-page);
+  background: var(--theme-accent);
+  border-color: var(--theme-accent);
+}
+
+.site-theme-image-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.site-theme-image-item {
+  display: grid;
+  gap: 0.35rem;
+  width: 7rem;
+}
+
+.site-theme-image-item img {
+  width: 7rem;
+  height: 4rem;
+  object-fit: cover;
+  border: 1px solid var(--theme-border);
+  border-radius: 0.4rem;
 }
 
 .profile-display-theme {
@@ -1131,14 +1489,56 @@ body.dark-mode .chat-message + .chat-message {
   color: var(--theme-accent);
 }
 
+.theme-has-image {
+  isolation: isolate;
+}
+
+/* Keep an uploaded image visually present through the content instead of
+   replacing it with opaque cards. The fixed overlay in theme-style.ts and the
+   translucent layers together preserve readable text and form controls. */
+@supports (background: color-mix(in srgb, #000 50%, transparent)) {
+  .profile-display-theme.theme-has-image .card,
+  .profile-theme-preview.theme-has-image,
+  .site-theme-app.theme-has-image .card,
+  .site-theme-app.theme-has-image .list-group-item,
+  .chat-room-card.theme-has-image,
+  .chat-room-page.theme-has-image .chat-messages-card,
+  .chat-room-page.theme-has-image .chat-room-theme-card {
+    background-color: color-mix(in srgb, var(--theme-surface) 42%, transparent) !important;
+    backdrop-filter: blur(6px) saturate(110%);
+    -webkit-backdrop-filter: blur(6px) saturate(110%);
+  }
+
+  .recommendation-offcanvas.chatbot-theme.theme-has-image .card,
+  body.dark-mode .recommendation-offcanvas.chatbot-theme.theme-has-image .card {
+    background-color: color-mix(in srgb, var(--theme-surface) 42%, transparent) !important;
+    backdrop-filter: blur(6px) saturate(110%);
+    -webkit-backdrop-filter: blur(6px) saturate(110%);
+  }
+
+  .profile-display-theme.theme-has-image input,
+  .profile-display-theme.theme-has-image select,
+  .profile-display-theme.theme-has-image textarea,
+  .site-theme-app.theme-has-image input,
+  .site-theme-app.theme-has-image select,
+  .site-theme-app.theme-has-image textarea,
+  .chat-room-page.theme-has-image input,
+  .chat-room-page.theme-has-image select,
+  .chat-room-page.theme-has-image textarea {
+    background-color: color-mix(in srgb, var(--theme-surface-strong) 38%, transparent) !important;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+}
+
 .chat-theme-select { max-width: 16rem; }
 
-body.dark-mode .profile-display-theme .card,
-body.dark-mode .profile-theme-preview,
-body.dark-mode .chat-room-card[class*="chat-room-theme-"],
-body.dark-mode .chat-room-page[class*="chat-room-theme-"] .chat-messages-card,
-body.dark-mode .chat-room-page[class*="chat-room-theme-"] .chat-room-image-card,
-body.dark-mode .chat-room-page[class*="chat-room-theme-"] .chat-room-theme-card {
+body.dark-mode .profile-display-theme:not(.theme-has-image) .card,
+body.dark-mode .profile-theme-preview:not(.theme-has-image),
+body.dark-mode .chat-room-card[class*="chat-room-theme-"]:not(.theme-has-image),
+body.dark-mode .chat-room-page[class*="chat-room-theme-"]:not(.theme-has-image) .chat-messages-card,
+body.dark-mode .chat-room-page[class*="chat-room-theme-"]:not(.theme-has-image) .chat-room-image-card,
+body.dark-mode .chat-room-page[class*="chat-room-theme-"]:not(.theme-has-image) .chat-room-theme-card {
   background: var(--theme-surface);
   border-color: var(--theme-border);
   color: var(--theme-text);

@@ -27,8 +27,40 @@ Use AniList as the public catalog search source and resolve MangaDex chapters on
 ## API and data
 
 - `GET /anilist/manga/search?title=&genre=&tag=&year=&format=&status=&sort=&page=&perPage=` returns AniList metadata filtered upstream by AniList.
+- The public AniList search accepts an optional `staffId` catalog filter for
+  finding other manga by a resolved author. The backend uses AniList's public
+  `Staff.staffMedia` connection, exposing no AniList account data.
 - `GET /anilist/manga/reading-source/:anilistId` returns `{ available, mangaId? }` only when the confident MangaDex match has at least one chapter.
 - AniList metadata calls are cached for two minutes per query and variables; duplicate concurrent calls share one upstream request.
+
+## Typed recommendation follow-up
+
+### Goal
+
+Support the Chatbot's “same author as <title>” request with a precise AniList
+staff-ID lookup, while the frontend resolves the referenced manga title.
+
+### Implementation
+
+1. Validate a positive optional `staffId` on the existing manga search route.
+2. Add AniList's `staffId` media filter and query variable only when supplied.
+3. Cover query construction and route validation with focused tests.
+
+### Validation
+
+- Run the AniList client/controller tests and the required database test before
+  rebuilding and restarting the backend alongside the frontend.
+
+### Status
+
+- Implemented the optional validated `staffId` filter through AniList's
+  supported `Staff.staffMedia` connection.
+- Also added the validated repeated `genres[]` filter (`genre_in` upstream),
+  allowing Chatbot's typed multi-genre requests to remain server-filtered.
+- Passed `go test ./modules/anilist-api ./controllers` and
+  `go test ./modules/database` before the service rebuild.
+- A live local API check resolved *Berserk* to Kentarou Miura and successfully
+  returned a manga from the author recommendation query.
 
 ## Validation
 

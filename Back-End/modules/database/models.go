@@ -9,14 +9,24 @@ import (
 	"github.com/lib/pq"
 )
 
+// StringArray makes a validated []string suitable for the PostgreSQL TEXT[]
+// site-theme image column without exposing driver details to callers.
+func StringArray(values []string) pq.StringArray {
+	return pq.StringArray(values)
+}
+
 const (
-	ChatRoomPublic        = "public"
-	ChatRoomInviteOnly    = "invite_only"
-	DisplayThemeMidnight  = "midnight"
-	DisplayThemeForest    = "forest"
-	DisplayThemePlum      = "plum"
-	DisplayThemeEmber     = "ember"
-	DisplayThemeParchment = "parchment"
+	ChatRoomPublic            = "public"
+	ChatRoomInviteOnly        = "invite_only"
+	DisplayThemeMidnight      = "midnight"
+	DisplayThemeForest        = "forest"
+	DisplayThemePlum          = "plum"
+	DisplayThemeEmber         = "ember"
+	DisplayThemeParchment     = "parchment"
+	SiteThemeRotationStatic   = "static"
+	SiteThemeRotationRefresh  = "refresh"
+	SiteThemeRotationSession  = "session"
+	SiteThemeRotationInterval = "interval"
 )
 
 // IsDisplayTheme reports whether a client-supplied presentation theme is one
@@ -48,25 +58,58 @@ func NormalizeCustomThemeColor(color string) (string, bool) {
 	return color, true
 }
 
+// IsSiteThemeRotationSeconds limits image rotation to predictable, modest
+// intervals. Zero means that the selected site theme image stays static.
+func IsSiteThemeRotationSeconds(seconds int) bool {
+	switch seconds {
+	case 0, 15, 30, 60:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsSiteThemeRotationMode(mode string) bool {
+	switch mode {
+	case SiteThemeRotationStatic, SiteThemeRotationRefresh, SiteThemeRotationSession, SiteThemeRotationInterval:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsSiteThemeRotationMinutes(minutes int) bool {
+	return minutes >= 1 && minutes <= 1440
+}
+
 var (
-	ErrChatRoomNotFound   = errors.New("chat room not found")
-	ErrChatRoomAccess     = errors.New("chat room access denied")
-	ErrChatInviteRequired = errors.New("chat room requires an invitation")
-	ErrChatInviteInvalid  = errors.New("chat invitation is invalid")
+	ErrChatRoomNotFound           = errors.New("chat room not found")
+	ErrChatRoomAccess             = errors.New("chat room access denied")
+	ErrChatInviteRequired         = errors.New("chat room requires an invitation")
+	ErrChatInviteInvalid          = errors.New("chat invitation is invalid")
+	ErrChatMessageReportDenied    = errors.New("chat message report denied")
+	ErrChatMessageAlreadyReported = errors.New("chat message already reported")
+	ErrChatMessageReplyTarget     = errors.New("chat message reply target is invalid")
 )
 
 // User represents a user in the system
 type User struct {
-	ID               int       `json:"id" db:"id"`
-	Email            string    `json:"email" db:"email"`
-	Role             string    `json:"role" db:"role"`
-	DisplayName      string    `json:"display_name" db:"display_name"`
-	ProfileImagePath string    `json:"profile_image_path" db:"profile_image_path"`
-	DisplayTheme     string    `json:"display_theme" db:"display_theme"`
-	CustomThemeColor string    `json:"custom_theme_color" db:"custom_theme_color"`
-	ThemeImagePath   string    `json:"theme_image_path" db:"theme_image_path"`
-	PasswordHash     string    `json:"-" db:"password_hash"` // "-" prevents password from being serialized to JSON
-	CreatedAt        time.Time `json:"created_at" db:"created_at"`
+	ID                            int            `json:"id" db:"id"`
+	Email                         string         `json:"email" db:"email"`
+	Role                          string         `json:"role" db:"role"`
+	DisplayName                   string         `json:"display_name" db:"display_name"`
+	ProfileImagePath              string         `json:"profile_image_path" db:"profile_image_path"`
+	DisplayTheme                  string         `json:"display_theme" db:"display_theme"`
+	CustomThemeColor              string         `json:"custom_theme_color" db:"custom_theme_color"`
+	ThemeImagePath                string         `json:"theme_image_path" db:"theme_image_path"`
+	SiteTheme                     string         `json:"site_theme" db:"site_theme"`
+	SiteCustomColor               string         `json:"site_custom_color" db:"site_custom_color"`
+	SiteThemeImagePaths           pq.StringArray `json:"site_theme_image_paths" db:"site_theme_image_paths"`
+	SiteThemeImageRotationSeconds int            `json:"site_theme_image_rotation_seconds" db:"site_theme_image_rotation_seconds"`
+	SiteThemeImageRotationMode    string         `json:"site_theme_image_rotation_mode" db:"site_theme_image_rotation_mode"`
+	SiteThemeImageRotationMinutes int            `json:"site_theme_image_rotation_minutes" db:"site_theme_image_rotation_minutes"`
+	PasswordHash                  string         `json:"-" db:"password_hash"` // "-" prevents password from being serialized to JSON
+	CreatedAt                     time.Time      `json:"created_at" db:"created_at"`
 }
 
 // AdminDashboardStats contains aggregate-only metrics safe to expose to an
@@ -104,8 +147,10 @@ type ChatMessage struct {
 	RoomID            int64  `json:"roomId"`
 	UserID            int    `json:"userId"`
 	AuthorDisplayName string `json:"authorDisplayName"`
+	ProfileImagePath  string `json:"profileImagePath"`
 	Body              string `json:"body"`
 	ImagePath         string `json:"imagePath"`
+	ReplyToMessageID  int64  `json:"replyToMessageId"`
 	CreatedAt         string `json:"createdAt"`
 }
 

@@ -15,6 +15,7 @@ const ChatRoomsPage: React.FC = () => {
     const [joiningRoomID, setJoiningRoomID] = useState<number | null>(null);
     const [name, setName] = useState('');
     const [visibility, setVisibility] = useState<ChatRoomVisibility>('public');
+    const [showCreateForm, setShowCreateForm] = useState(false);
 
     const loadRooms = useCallback(async () => {
         setLoading(true);
@@ -68,7 +69,7 @@ const ChatRoomsPage: React.FC = () => {
 
     const renderRoom = (room: ChatRoom) => (
         <Col key={room.id} md={6} xl={4}>
-            <Card className={`chat-room-card chat-room-theme-${room.theme || 'midnight'} h-100 shadow-sm`} style={presentationThemeStyle(room.customThemeColor, room.themeImagePath ? `${backend.getBaseUrl()}${room.themeImagePath}` : '')}>
+            <Card className={`chat-room-card chat-room-theme-${room.theme || 'midnight'}${room.themeImagePath ? ' theme-has-image' : ''} h-100 shadow-sm`} style={presentationThemeStyle(room.customThemeColor, room.themeImagePath ? `${backend.getBaseUrl()}${room.themeImagePath}` : '')}>
                 <Card.Body className="d-flex flex-column">
                     <div className="d-flex align-items-start justify-content-between gap-2">
                         <div className="d-flex align-items-start gap-3">
@@ -90,15 +91,15 @@ const ChatRoomsPage: React.FC = () => {
         <Container className="py-4 py-md-5 chat-rooms-page">
             <div className="mb-4">
                 <p className="text-uppercase small text-muted fw-semibold mb-1">Community</p>
-                <h1 className="h2 mb-2">Chatrooms</h1>
+                <div className="d-flex flex-wrap align-items-center justify-content-between gap-3"><h1 className="h2 mb-0">Chatrooms</h1><Button onClick={() => setShowCreateForm((current) => !current)} aria-expanded={showCreateForm} aria-controls="create-chatroom-panel">{showCreateForm ? 'Close creator' : 'Create chatroom'}</Button></div>
                 <p className="text-muted mb-0">Join a public conversation or create a private room for people you invite. Private rooms never appear in public browsing.</p>
             </div>
 
             {error && <Alert variant="danger">{error}</Alert>}
 
-            <Card className="chat-create-card shadow-sm mb-4">
+            {showCreateForm && <Card id="create-chatroom-panel" className="chat-create-card shadow-sm mb-4">
                 <Card.Body>
-                    <h2 className="h5">Create a chatroom</h2>
+                    <div className="d-flex justify-content-between align-items-center gap-3"><h2 className="h5 mb-0">Create a chatroom</h2><Button variant="outline-secondary" size="sm" onClick={() => setShowCreateForm(false)} disabled={creating}>Cancel</Button></div>
                     <Form onSubmit={createRoom} className="row g-3 align-items-end">
                         <Form.Group as={Col} md={7} controlId="chat-room-name">
                             <Form.Label>Room name</Form.Label>
@@ -114,7 +115,7 @@ const ChatRoomsPage: React.FC = () => {
                         <Col md={2}><Button type="submit" className="w-100" disabled={creating}>{creating ? 'Creating…' : 'Create'}</Button></Col>
                     </Form>
                 </Card.Body>
-            </Card>
+            </Card>}
 
             {loading ? <div className="py-5 d-flex gap-2 align-items-center" role="status"><Spinner animation="border" size="sm" /> Loading chatrooms…</div> : <>
                 <section aria-labelledby="public-rooms-heading">

@@ -22,6 +22,12 @@ func RunMigrations() {
 		display_theme VARCHAR(24) NOT NULL DEFAULT 'midnight',
 		custom_theme_color VARCHAR(7) NOT NULL DEFAULT '',
 		theme_image_path VARCHAR(512) NOT NULL DEFAULT '',
+		site_theme VARCHAR(24) NOT NULL DEFAULT 'midnight',
+		site_custom_color VARCHAR(7) NOT NULL DEFAULT '',
+		site_theme_image_paths TEXT[] NOT NULL DEFAULT '{}',
+		site_theme_image_rotation_seconds INTEGER NOT NULL DEFAULT 0,
+		site_theme_image_rotation_mode VARCHAR(16) NOT NULL DEFAULT 'static',
+		site_theme_image_rotation_minutes INTEGER NOT NULL DEFAULT 15,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -70,9 +76,28 @@ func RunMigrations() {
 	ALTER TABLE users
 		ADD COLUMN IF NOT EXISTS display_theme VARCHAR(24) NOT NULL DEFAULT 'midnight',
 		ADD COLUMN IF NOT EXISTS custom_theme_color VARCHAR(7) NOT NULL DEFAULT '',
-		ADD COLUMN IF NOT EXISTS theme_image_path VARCHAR(512) NOT NULL DEFAULT '';
+		ADD COLUMN IF NOT EXISTS theme_image_path VARCHAR(512) NOT NULL DEFAULT '',
+		ADD COLUMN IF NOT EXISTS site_theme VARCHAR(24) NOT NULL DEFAULT 'midnight',
+		ADD COLUMN IF NOT EXISTS site_custom_color VARCHAR(7) NOT NULL DEFAULT '',
+		ADD COLUMN IF NOT EXISTS site_theme_image_paths TEXT[] NOT NULL DEFAULT '{}',
+		ADD COLUMN IF NOT EXISTS site_theme_image_rotation_seconds INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE users
+		ADD COLUMN IF NOT EXISTS site_theme_image_rotation_mode VARCHAR(16) NOT NULL DEFAULT 'static',
+		ADD COLUMN IF NOT EXISTS site_theme_image_rotation_minutes INTEGER NOT NULL DEFAULT 15;
 	UPDATE users SET display_theme = 'midnight'
 		WHERE display_theme IS NULL OR display_theme = '';
+	UPDATE users SET site_theme = 'midnight'
+		WHERE site_theme IS NULL OR site_theme = '';
+	UPDATE users SET site_theme_image_rotation_seconds = 0
+		WHERE site_theme_image_rotation_seconds IS NULL
+		   OR site_theme_image_rotation_seconds NOT IN (0, 15, 30, 60);
+	UPDATE users SET site_theme_image_rotation_mode = 'static'
+		WHERE site_theme_image_rotation_mode IS NULL
+		   OR site_theme_image_rotation_mode NOT IN ('static', 'refresh', 'session', 'interval');
+	UPDATE users SET site_theme_image_rotation_minutes = 15
+		WHERE site_theme_image_rotation_minutes IS NULL
+		   OR site_theme_image_rotation_minutes < 1
+		   OR site_theme_image_rotation_minutes > 1440;
 	`
 
 	// Create manga table with MangaDex-specific fields
@@ -322,6 +347,28 @@ func RunMigrations() {
 		ADD COLUMN IF NOT EXISTS theme_image_path VARCHAR(512) NOT NULL DEFAULT '';
 	`
 
+	createChatMessageReports := `
+	CREATE TABLE IF NOT EXISTS chat_message_reports (
+		id BIGSERIAL PRIMARY KEY,
+		message_id BIGINT NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+		room_id BIGINT NOT NULL REFERENCES chat_rooms(id) ON DELETE CASCADE,
+		reporter_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		reason VARCHAR(500) NOT NULL,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE (message_id, reporter_user_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_chat_message_reports_room_created
+		ON chat_message_reports(room_id, created_at DESC);
+	`
+
+	addChatMessageReplyTarget := `
+	ALTER TABLE chat_messages
+		ADD COLUMN IF NOT EXISTS reply_to_message_id BIGINT NOT NULL DEFAULT 0;
+	CREATE INDEX IF NOT EXISTS idx_chat_messages_reply_to
+		ON chat_messages(reply_to_message_id)
+		WHERE reply_to_message_id > 0;
+	`
+
 	// Execute migrations
 	migrations := []struct {
 		name  string
@@ -347,6 +394,8 @@ func RunMigrations() {
 		{"user_preferred_reading_mode", addPreferredReadingMode},
 		{"user_manga_scanlation_group_preferences", createScanlationGroupPreferences},
 		{"chatrooms", createChatTables},
+		{"chat_message_reports", createChatMessageReports},
+		{"chat_message_reply_target", addChatMessageReplyTarget},
 	}
 
 	for _, migration := range migrations {

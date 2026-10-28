@@ -16,6 +16,10 @@ func SearchMangaQuery(filters MangaSearchFilters) string {
 		declarations = append(declarations, "$genre: String!")
 		arguments = append(arguments, "genre: $genre")
 	}
+	if len(filters.Genres) > 0 {
+		declarations = append(declarations, "$genres: [String!]!")
+		arguments = append(arguments, "genre_in: $genres")
+	}
 	if filters.Tag != "" {
 		declarations = append(declarations, "$tag: String!")
 		arguments = append(arguments, "tag: $tag")
@@ -49,6 +53,26 @@ func SearchMangaQuery(filters MangaSearchFilters) string {
 
 ` + mangaSearchFieldsFragment
 }
+
+// MangaByStaffQuery fetches public manga credits through AniList's Staff
+// connection. Media's browse query has no direct staff filter.
+const MangaByStaffQuery = `query MangaByStaff($staffId: Int!, $page: Int!, $perPage: Int!) {
+  Staff(id: $staffId) {
+    staffMedia(page: $page, perPage: $perPage, type: MANGA, sort: [POPULARITY_DESC]) {
+      pageInfo {
+        currentPage
+        hasNextPage
+        perPage
+        total
+      }
+      nodes {
+        ...MangaSearchFields
+      }
+    }
+  }
+}
+
+` + mangaSearchFieldsFragment
 
 const mangaSearchFieldsFragment = `fragment MangaSearchFields on Media {
   id

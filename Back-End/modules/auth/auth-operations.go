@@ -41,7 +41,7 @@ func CreateUser(email, password string) (*database.User, error) {
 	query := `
 		INSERT INTO users (email, password_hash, display_name, created_at)
 		VALUES ($1, $2, $3, $4)
-		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, created_at
+		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, site_theme, site_custom_color, site_theme_image_paths, site_theme_image_rotation_seconds, site_theme_image_rotation_mode, site_theme_image_rotation_minutes, created_at
 	`
 
 	user := &database.User{}
@@ -55,6 +55,12 @@ func CreateUser(email, password string) (*database.User, error) {
 		&user.DisplayTheme,
 		&user.CustomThemeColor,
 		&user.ThemeImagePath,
+		&user.SiteTheme,
+		&user.SiteCustomColor,
+		&user.SiteThemeImagePaths,
+		&user.SiteThemeImageRotationSeconds,
+		&user.SiteThemeImageRotationMode,
+		&user.SiteThemeImageRotationMinutes,
 		&user.CreatedAt,
 	)
 
@@ -70,7 +76,7 @@ func CreateUser(email, password string) (*database.User, error) {
 // GetUserByEmail retrieves a user by email
 func GetUserByEmail(email string) (*database.User, error) {
 	query := `
-		SELECT id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, password_hash, created_at
+		SELECT id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, site_theme, site_custom_color, site_theme_image_paths, site_theme_image_rotation_seconds, site_theme_image_rotation_mode, site_theme_image_rotation_minutes, password_hash, created_at
 		FROM users
 		WHERE email = $1
 	`
@@ -85,6 +91,12 @@ func GetUserByEmail(email string) (*database.User, error) {
 		&user.DisplayTheme,
 		&user.CustomThemeColor,
 		&user.ThemeImagePath,
+		&user.SiteTheme,
+		&user.SiteCustomColor,
+		&user.SiteThemeImagePaths,
+		&user.SiteThemeImageRotationSeconds,
+		&user.SiteThemeImageRotationMode,
+		&user.SiteThemeImageRotationMinutes,
 		&user.PasswordHash,
 		&user.CreatedAt,
 	)
@@ -103,7 +115,7 @@ func GetUserByEmail(email string) (*database.User, error) {
 // GetUserByID retrieves a user by ID
 func GetUserByID(userID int) (*database.User, error) {
 	query := `
-		SELECT id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, password_hash, created_at
+		SELECT id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, site_theme, site_custom_color, site_theme_image_paths, site_theme_image_rotation_seconds, site_theme_image_rotation_mode, site_theme_image_rotation_minutes, password_hash, created_at
 		FROM users
 		WHERE id = $1
 	`
@@ -118,6 +130,12 @@ func GetUserByID(userID int) (*database.User, error) {
 		&user.DisplayTheme,
 		&user.CustomThemeColor,
 		&user.ThemeImagePath,
+		&user.SiteTheme,
+		&user.SiteCustomColor,
+		&user.SiteThemeImagePaths,
+		&user.SiteThemeImageRotationSeconds,
+		&user.SiteThemeImageRotationMode,
+		&user.SiteThemeImageRotationMinutes,
 		&user.PasswordHash,
 		&user.CreatedAt,
 	)
@@ -139,9 +157,9 @@ func UpdateUserDisplayName(userID int, displayName string) (*database.User, erro
 	user := &database.User{}
 	err := database.DB.QueryRow(`
 		UPDATE users SET display_name = $1 WHERE id = $2
-		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, created_at
+		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, site_theme, site_custom_color, site_theme_image_paths, site_theme_image_rotation_seconds, site_theme_image_rotation_mode, site_theme_image_rotation_minutes, created_at
 	`, displayName, userID).Scan(
-		&user.ID, &user.Email, &user.Role, &user.DisplayName, &user.ProfileImagePath, &user.DisplayTheme, &user.CustomThemeColor, &user.ThemeImagePath, &user.CreatedAt,
+		&user.ID, &user.Email, &user.Role, &user.DisplayName, &user.ProfileImagePath, &user.DisplayTheme, &user.CustomThemeColor, &user.ThemeImagePath, &user.SiteTheme, &user.SiteCustomColor, &user.SiteThemeImagePaths, &user.SiteThemeImageRotationSeconds, &user.SiteThemeImageRotationMode, &user.SiteThemeImageRotationMinutes, &user.CreatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, ErrUserNotFound
@@ -157,9 +175,9 @@ func UpdateUserProfileImagePath(userID int, imagePath string) (*database.User, e
 	user := &database.User{}
 	err := database.DB.QueryRow(`
 		UPDATE users SET profile_image_path = $1 WHERE id = $2
-		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, created_at
+		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, site_theme, site_custom_color, site_theme_image_paths, site_theme_image_rotation_seconds, site_theme_image_rotation_mode, site_theme_image_rotation_minutes, created_at
 	`, imagePath, userID).Scan(
-		&user.ID, &user.Email, &user.Role, &user.DisplayName, &user.ProfileImagePath, &user.DisplayTheme, &user.CustomThemeColor, &user.ThemeImagePath, &user.CreatedAt,
+		&user.ID, &user.Email, &user.Role, &user.DisplayName, &user.ProfileImagePath, &user.DisplayTheme, &user.CustomThemeColor, &user.ThemeImagePath, &user.SiteTheme, &user.SiteCustomColor, &user.SiteThemeImagePaths, &user.SiteThemeImageRotationSeconds, &user.SiteThemeImageRotationMode, &user.SiteThemeImageRotationMinutes, &user.CreatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, ErrUserNotFound
@@ -176,9 +194,47 @@ func UpdateUserDisplayTheme(userID int, displayTheme, customThemeColor string) (
 	user := &database.User{}
 	err := database.DB.QueryRow(`
 		UPDATE users SET display_theme = $1, custom_theme_color = $2 WHERE id = $3
-		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, created_at
+		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, site_theme, site_custom_color, site_theme_image_paths, site_theme_image_rotation_seconds, site_theme_image_rotation_mode, site_theme_image_rotation_minutes, created_at
 	`, displayTheme, customThemeColor, userID).Scan(
-		&user.ID, &user.Email, &user.Role, &user.DisplayName, &user.ProfileImagePath, &user.DisplayTheme, &user.CustomThemeColor, &user.ThemeImagePath, &user.CreatedAt,
+		&user.ID, &user.Email, &user.Role, &user.DisplayName, &user.ProfileImagePath, &user.DisplayTheme, &user.CustomThemeColor, &user.ThemeImagePath, &user.SiteTheme, &user.SiteCustomColor, &user.SiteThemeImagePaths, &user.SiteThemeImageRotationSeconds, &user.SiteThemeImageRotationMode, &user.SiteThemeImageRotationMinutes, &user.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+// UpdateUserSiteTheme records the authenticated user's global application
+// palette independently from their profile presentation theme.
+func UpdateUserSiteTheme(userID int, siteTheme, siteCustomColor, siteThemeImageRotationMode string, siteThemeImageRotationMinutes int) (*database.User, error) {
+	user := &database.User{}
+	err := database.DB.QueryRow(`
+		UPDATE users SET site_theme = $1, site_custom_color = $2, site_theme_image_rotation_mode = $3, site_theme_image_rotation_minutes = $4 WHERE id = $5
+		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, site_theme, site_custom_color, site_theme_image_paths, site_theme_image_rotation_seconds, site_theme_image_rotation_mode, site_theme_image_rotation_minutes, created_at
+	`, siteTheme, siteCustomColor, siteThemeImageRotationMode, siteThemeImageRotationMinutes, userID).Scan(
+		&user.ID, &user.Email, &user.Role, &user.DisplayName, &user.ProfileImagePath, &user.DisplayTheme, &user.CustomThemeColor, &user.ThemeImagePath, &user.SiteTheme, &user.SiteCustomColor, &user.SiteThemeImagePaths, &user.SiteThemeImageRotationSeconds, &user.SiteThemeImageRotationMode, &user.SiteThemeImageRotationMinutes, &user.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+// UpdateUserSiteThemeImagePaths replaces the authenticated user's bounded,
+// server-generated global background image list.
+func UpdateUserSiteThemeImagePaths(userID int, imagePaths []string) (*database.User, error) {
+	user := &database.User{}
+	err := database.DB.QueryRow(`
+		UPDATE users SET site_theme_image_paths = $1 WHERE id = $2
+		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, site_theme, site_custom_color, site_theme_image_paths, site_theme_image_rotation_seconds, site_theme_image_rotation_mode, site_theme_image_rotation_minutes, created_at
+	`, database.StringArray(imagePaths), userID).Scan(
+		&user.ID, &user.Email, &user.Role, &user.DisplayName, &user.ProfileImagePath, &user.DisplayTheme, &user.CustomThemeColor, &user.ThemeImagePath, &user.SiteTheme, &user.SiteCustomColor, &user.SiteThemeImagePaths, &user.SiteThemeImageRotationSeconds, &user.SiteThemeImageRotationMode, &user.SiteThemeImageRotationMinutes, &user.CreatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, ErrUserNotFound
@@ -195,9 +251,9 @@ func UpdateUserThemeImagePath(userID int, imagePath string) (*database.User, err
 	user := &database.User{}
 	err := database.DB.QueryRow(`
 		UPDATE users SET theme_image_path = $1 WHERE id = $2
-		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, created_at
+		RETURNING id, email, role, display_name, profile_image_path, display_theme, custom_theme_color, theme_image_path, site_theme, site_custom_color, site_theme_image_paths, site_theme_image_rotation_seconds, site_theme_image_rotation_mode, site_theme_image_rotation_minutes, created_at
 	`, imagePath, userID).Scan(
-		&user.ID, &user.Email, &user.Role, &user.DisplayName, &user.ProfileImagePath, &user.DisplayTheme, &user.CustomThemeColor, &user.ThemeImagePath, &user.CreatedAt,
+		&user.ID, &user.Email, &user.Role, &user.DisplayName, &user.ProfileImagePath, &user.DisplayTheme, &user.CustomThemeColor, &user.ThemeImagePath, &user.SiteTheme, &user.SiteCustomColor, &user.SiteThemeImagePaths, &user.SiteThemeImageRotationSeconds, &user.SiteThemeImageRotationMode, &user.SiteThemeImageRotationMinutes, &user.CreatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, ErrUserNotFound

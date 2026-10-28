@@ -31,14 +31,21 @@ func searchAniListManga(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid search filters", "message": "year must be a whole number"})
 		return
 	}
+	staffID, err := optionalIntQuery(c, "staffId")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid search filters", "message": "staffId must be a whole number"})
+		return
+	}
 	filters, err := (anilist_api.MangaSearchFilters{
-		Title:  c.Query("title"),
-		Genre:  c.Query("genre"),
-		Tag:    c.Query("tag"),
-		Year:   year,
-		Format: c.Query("format"),
-		Status: c.Query("status"),
-		Sort:   c.Query("sort"),
+		Title:   c.Query("title"),
+		Genre:   c.Query("genre"),
+		Genres:  c.QueryArray("genres[]"),
+		Tag:     c.Query("tag"),
+		Year:    year,
+		Format:  c.Query("format"),
+		Status:  c.Query("status"),
+		StaffID: staffID,
+		Sort:    c.Query("sort"),
 	}).Normalize()
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid search filters", "message": err.Error()})

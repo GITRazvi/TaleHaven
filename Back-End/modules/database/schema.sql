@@ -13,6 +13,12 @@ CREATE TABLE IF NOT EXISTS users (
 	display_theme VARCHAR(24) NOT NULL DEFAULT 'midnight',
 	custom_theme_color VARCHAR(7) NOT NULL DEFAULT '',
 	theme_image_path VARCHAR(512) NOT NULL DEFAULT '',
+	site_theme VARCHAR(24) NOT NULL DEFAULT 'midnight',
+	site_custom_color VARCHAR(7) NOT NULL DEFAULT '',
+	site_theme_image_paths TEXT[] NOT NULL DEFAULT '{}',
+	site_theme_image_rotation_seconds INTEGER NOT NULL DEFAULT 0,
+	site_theme_image_rotation_mode VARCHAR(16) NOT NULL DEFAULT 'static',
+	site_theme_image_rotation_minutes INTEGER NOT NULL DEFAULT 15,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

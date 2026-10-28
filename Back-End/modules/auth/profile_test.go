@@ -55,4 +55,12 @@ func TestProfileUpdateOperationsReturnSafeUpdatedUser(t *testing.T) {
 	if updated.DisplayTheme != database.DisplayThemePlum || updated.CustomThemeColor != "#8a4fa3" || updated.PasswordHash != "" {
 		t.Fatalf("display theme update returned %#v", updated)
 	}
+
+	updated, err = UpdateUserSiteTheme(user.ID, database.DisplayThemeForest, "#3d8969", database.SiteThemeRotationInterval, 15)
+	if err != nil {
+		t.Fatalf("update site theme: %v", err)
+	}
+	if updated.SiteTheme != database.DisplayThemeForest || updated.SiteCustomColor != "#3d8969" || updated.SiteThemeImageRotationMode != database.SiteThemeRotationInterval || updated.SiteThemeImageRotationMinutes != 15 || updated.PasswordHash != "" {
+		t.Fatalf("site theme update returned %#v", updated)
+	}
 }

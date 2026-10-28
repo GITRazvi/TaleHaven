@@ -22,13 +22,15 @@ type MangaSearchResult struct {
 // MangaSearchFilters are the public AniList catalog constraints accepted by
 // TaleHaven. Empty optional fields are omitted from the upstream GraphQL query.
 type MangaSearchFilters struct {
-	Title  string
-	Genre  string
-	Tag    string
-	Year   int
-	Format string
-	Status string
-	Sort   string
+	Title   string
+	Genre   string
+	Genres  []string
+	Tag     string
+	Year    int
+	Format  string
+	Status  string
+	StaffID int
+	Sort    string
 }
 
 var supportedMangaFormats = map[string]struct{}{
@@ -48,6 +50,12 @@ var supportedMangaSorts = map[string]struct{}{
 func (filters MangaSearchFilters) Normalize() (MangaSearchFilters, error) {
 	filters.Title = strings.TrimSpace(filters.Title)
 	filters.Genre = strings.TrimSpace(filters.Genre)
+	for index, genre := range filters.Genres {
+		filters.Genres[index] = strings.TrimSpace(genre)
+		if filters.Genres[index] == "" || len([]rune(filters.Genres[index])) > 100 {
+			return MangaSearchFilters{}, fmt.Errorf("AniList genres must each be between 1 and 100 characters")
+		}
+	}
 	filters.Tag = strings.TrimSpace(filters.Tag)
 	filters.Format = strings.ToUpper(strings.TrimSpace(filters.Format))
 	filters.Status = strings.ToUpper(strings.TrimSpace(filters.Status))
@@ -65,6 +73,12 @@ func (filters MangaSearchFilters) Normalize() (MangaSearchFilters, error) {
 	if filters.Year != 0 && (filters.Year < 1900 || filters.Year > 2100) {
 		return MangaSearchFilters{}, fmt.Errorf("AniList release year must be between 1900 and 2100")
 	}
+	if filters.StaffID < 0 {
+		return MangaSearchFilters{}, fmt.Errorf("AniList staff ID must be positive")
+	}
+	if filters.StaffID > 0 && (filters.Title != "" || filters.Genre != "" || len(filters.Genres) > 0 || filters.Tag != "" || filters.Year != 0 || filters.Format != "" || filters.Status != "") {
+		return MangaSearchFilters{}, fmt.Errorf("AniList staff ID cannot be combined with other manga filters")
+	}
 	if filters.Format != "" {
 		if _, supported := supportedMangaFormats[filters.Format]; !supported {
 			return MangaSearchFilters{}, fmt.Errorf("unsupported AniList manga format %q", filters.Format)
@@ -80,7 +94,7 @@ func (filters MangaSearchFilters) Normalize() (MangaSearchFilters, error) {
 			return MangaSearchFilters{}, fmt.Errorf("unsupported AniList manga sort %q", filters.Sort)
 		}
 	}
-	if filters.Title == "" && filters.Genre == "" && filters.Tag == "" && filters.Year == 0 && filters.Format == "" && filters.Status == "" && filters.Sort == "" {
+	if filters.Title == "" && filters.Genre == "" && len(filters.Genres) == 0 && filters.Tag == "" && filters.Year == 0 && filters.Format == "" && filters.Status == "" && filters.StaffID == 0 && filters.Sort == "" {
 		return MangaSearchFilters{}, fmt.Errorf("at least one AniList search filter is required")
 	}
 	if filters.Sort == "" {

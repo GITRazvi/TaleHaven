@@ -37,3 +37,13 @@ func TestChatInviteTokenHashIsStableAndSecretIsRandom(t *testing.T) {
 		t.Fatalf("invite tokens should be distinct: %q and %q, err %v", firstToken, secondToken, err)
 	}
 }
+
+func TestChatThemeBackgroundAllowsGIFWithoutExtendingOtherImageUploads(t *testing.T) {
+	gifContents := []byte("GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,")
+	if extension := chatImageExtension(gifContents, true); extension != ".gif" {
+		t.Fatalf("GIF theme extension = %q, want .gif", extension)
+	}
+	if extension := chatImageExtension(gifContents, false); extension != "" {
+		t.Fatalf("GIF should remain unavailable for non-theme uploads, got %q", extension)
+	}
+}

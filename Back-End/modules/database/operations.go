@@ -1258,7 +1258,8 @@ func GetChatMessages(roomID int64, userID int, limit int) ([]ChatMessage, error)
 	rows, err := DB.Query(`
 		SELECT m.id, m.room_id, m.user_id,
 			COALESCE(NULLIF(u.display_name, ''), split_part(u.email, '@', 1)),
-			m.body, COALESCE(m.image_path, ''),
+			COALESCE(u.profile_image_path, ''),
+			m.body, COALESCE(m.image_path, ''), COALESCE(m.reply_to_message_id, 0),
 			TO_CHAR(m.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		FROM chat_messages m
 		INNER JOIN users u ON u.id = m.user_id
@@ -1274,7 +1275,7 @@ func GetChatMessages(roomID int64, userID int, limit int) ([]ChatMessage, error)
 	messages := make([]ChatMessage, 0)
 	for rows.Next() {
 		var message ChatMessage
-		if err := rows.Scan(&message.ID, &message.RoomID, &message.UserID, &message.AuthorDisplayName, &message.Body, &message.ImagePath, &message.CreatedAt); err != nil {
+		if err := rows.Scan(&message.ID, &message.RoomID, &message.UserID, &message.AuthorDisplayName, &message.ProfileImagePath, &message.Body, &message.ImagePath, &message.ReplyToMessageID, &message.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan chat message: %w", err)
 		}
 		messages = append(messages, message)
@@ -1289,22 +1290,89 @@ func GetChatMessages(roomID int64, userID int, limit int) ([]ChatMessage, error)
 }
 
 // CreateChatMessage persists a message only for an existing room member.
-func CreateChatMessage(roomID int64, userID int, body string, imagePath string) (ChatMessage, error) {
+func CreateChatMessage(roomID int64, userID int, body string, imagePath string, replyToMessageID int64) (ChatMessage, error) {
+	if _, err := GetChatRoomForMember(roomID, userID); err != nil {
+		return ChatMessage{}, err
+	}
+	if replyToMessageID > 0 {
+		var replyTargetExists bool
+		if err := DB.QueryRow(`SELECT EXISTS (SELECT 1 FROM chat_messages WHERE id = $1 AND room_id = $2)`, replyToMessageID, roomID).Scan(&replyTargetExists); err != nil {
+			return ChatMessage{}, fmt.Errorf("check reply target: %w", err)
+		}
+		if !replyTargetExists {
+			return ChatMessage{}, ErrChatMessageReplyTarget
+		}
+	}
+
 	var message ChatMessage
 	err := DB.QueryRow(`
-		INSERT INTO chat_messages (room_id, user_id, body, image_path)
-		SELECT $1, $2, $3, $4
-		WHERE EXISTS (SELECT 1 FROM chat_room_members WHERE room_id = $1 AND user_id = $2)
-		RETURNING id, room_id, user_id, body, image_path,
+		INSERT INTO chat_messages (room_id, user_id, body, image_path, reply_to_message_id)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, room_id, user_id, body, image_path, reply_to_message_id,
 			TO_CHAR(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
-	`, roomID, userID, body, imagePath).Scan(&message.ID, &message.RoomID, &message.UserID, &message.Body, &message.ImagePath, &message.CreatedAt)
-	if err == sql.ErrNoRows {
-		return ChatMessage{}, ErrChatRoomAccess
-	}
+	`, roomID, userID, body, imagePath, replyToMessageID).Scan(&message.ID, &message.RoomID, &message.UserID, &message.Body, &message.ImagePath, &message.ReplyToMessageID, &message.CreatedAt)
 	if err != nil {
 		return ChatMessage{}, fmt.Errorf("create chat message: %w", err)
 	}
 	return message, nil
+}
+
+// DeleteChatMessage removes a message only when the current room member wrote
+// it. The returned path lets the controller remove an attached server-owned
+// image after the database record has been deleted.
+func DeleteChatMessage(roomID int64, userID int, messageID int64) (string, error) {
+	var imagePath string
+	err := DB.QueryRow(`
+		DELETE FROM chat_messages
+		WHERE id = $1
+			AND room_id = $2
+			AND user_id = $3
+			AND EXISTS (
+				SELECT 1 FROM chat_room_members
+				WHERE room_id = $2 AND user_id = $3
+			)
+		RETURNING COALESCE(image_path, '')
+	`, messageID, roomID, userID).Scan(&imagePath)
+	if err == sql.ErrNoRows {
+		return "", ErrChatRoomAccess
+	}
+	if err != nil {
+		return "", fmt.Errorf("delete chat message: %w", err)
+	}
+	return imagePath, nil
+}
+
+// ReportChatMessage stores one member's reason for reporting another member's
+// message. Reports are deliberately not exposed in normal room responses.
+func ReportChatMessage(roomID, messageID int64, reporterUserID int, reason string) error {
+	if _, err := GetChatRoomForMember(roomID, reporterUserID); err != nil {
+		return err
+	}
+	result, err := DB.Exec(`
+		INSERT INTO chat_message_reports (message_id, room_id, reporter_user_id, reason)
+		SELECT m.id, m.room_id, $3, $4
+		FROM chat_messages m
+		WHERE m.id = $1 AND m.room_id = $2 AND m.user_id <> $3
+		ON CONFLICT (message_id, reporter_user_id) DO NOTHING
+	`, messageID, roomID, reporterUserID, reason)
+	if err != nil {
+		return fmt.Errorf("report chat message: %w", err)
+	}
+	added, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read chat report result: %w", err)
+	}
+	if added > 0 {
+		return nil
+	}
+	var reported bool
+	if err := DB.QueryRow(`SELECT EXISTS (SELECT 1 FROM chat_message_reports WHERE message_id = $1 AND reporter_user_id = $2)`, messageID, reporterUserID).Scan(&reported); err != nil {
+		return fmt.Errorf("read existing chat report: %w", err)
+	}
+	if reported {
+		return ErrChatMessageAlreadyReported
+	}
+	return ErrChatMessageReportDenied
 }
 
 // GetDownloadedMangaWithCovers returns all manga that have downloaded chapters and cover images

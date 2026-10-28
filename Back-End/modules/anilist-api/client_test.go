@@ -34,6 +34,9 @@ func TestSearchMangaPostsVariablesAndDecodesResponse(t *testing.T) {
 		if got := request.Variables["genre"]; got != "Fantasy" {
 			t.Fatalf("genre variable = %#v, want Fantasy", got)
 		}
+		if got := request.Variables["genres"]; !reflect.DeepEqual(got, []any{"Action", "Adventure"}) {
+			t.Fatalf("genres variable = %#v, want Action and Adventure", got)
+		}
 		if got := request.Variables["tag"]; got != "Isekai" {
 			t.Fatalf("tag variable = %#v, want Isekai", got)
 		}
@@ -62,7 +65,7 @@ func TestSearchMangaPostsVariablesAndDecodesResponse(t *testing.T) {
 
 	client := NewClientWithEndpoint(server.URL, server.Client())
 	result, err := client.SearchManga(context.Background(), MangaSearchFilters{
-		Title: "Berserk", Genre: "Fantasy", Tag: "Isekai", Year: 1997, Format: "MANGA", Status: "FINISHED", Sort: "SCORE_DESC",
+		Title: "Berserk", Genre: "Fantasy", Genres: []string{"Action", "Adventure"}, Tag: "Isekai", Year: 1997, Format: "MANGA", Status: "FINISHED", Sort: "SCORE_DESC",
 	}, 2, 12)
 	if err != nil {
 		t.Fatalf("SearchManga returned error: %v", err)
@@ -72,6 +75,32 @@ func TestSearchMangaPostsVariablesAndDecodesResponse(t *testing.T) {
 		t.Fatalf("unexpected page info: %#v", result.PageInfo)
 	}
 	if len(result.Manga) != 1 || result.Manga[0].ID != 33 || result.Manga[0].CoverImage.Large != "https://example.test/cover.jpg" {
+		t.Fatalf("unexpected manga: %#v", result.Manga)
+	}
+}
+
+func TestSearchMangaByStaffIDUsesStaffMediaConnection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request graphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !strings.Contains(request.Query, "query MangaByStaff") || !strings.Contains(request.Query, "staffMedia") {
+			t.Fatalf("expected staff media query, got: %s", request.Query)
+		}
+		if got := request.Variables["staffId"]; got != float64(42) {
+			t.Fatalf("staffId variable = %#v, want 42", got)
+		}
+		_, _ = w.Write([]byte(`{"data":{"Staff":{"staffMedia":{"pageInfo":{"currentPage":1,"hasNextPage":false,"perPage":12,"total":1},"nodes":[{"id":33,"title":{"romaji":"Berserk"}}]}}}}`))
+	}))
+	defer server.Close()
+
+	client := NewClientWithEndpoint(server.URL, server.Client())
+	result, err := client.SearchManga(context.Background(), MangaSearchFilters{StaffID: 42}, 1, 12)
+	if err != nil {
+		t.Fatalf("SearchManga returned error: %v", err)
+	}
+	if len(result.Manga) != 1 || result.Manga[0].ID != 33 {
 		t.Fatalf("unexpected manga: %#v", result.Manga)
 	}
 }

@@ -86,6 +86,9 @@ func (c *Client) SearchManga(ctx context.Context, filters MangaSearchFilters, pa
 	if perPage < 1 || perPage > 50 {
 		return nil, fmt.Errorf("AniList perPage must be between 1 and 50")
 	}
+	if filters.StaffID > 0 {
+		return c.GetMangaByStaffID(ctx, filters.StaffID, page, perPage)
+	}
 
 	var data struct {
 		Page struct {
@@ -104,6 +107,9 @@ func (c *Client) SearchManga(ctx context.Context, filters MangaSearchFilters, pa
 	if filters.Genre != "" {
 		variables["genre"] = filters.Genre
 	}
+	if len(filters.Genres) > 0 {
+		variables["genres"] = filters.Genres
+	}
 	if filters.Tag != "" {
 		variables["tag"] = filters.Tag
 	}
@@ -121,6 +127,26 @@ func (c *Client) SearchManga(ctx context.Context, filters MangaSearchFilters, pa
 	}
 
 	return &MangaSearchResult{PageInfo: data.Page.PageInfo, Manga: data.Page.Media}, nil
+}
+
+// GetMangaByStaffID retrieves manga credited to one AniList staff member.
+func (c *Client) GetMangaByStaffID(ctx context.Context, staffID, page, perPage int) (*MangaSearchResult, error) {
+	if staffID < 1 {
+		return nil, fmt.Errorf("AniList staff ID must be positive")
+	}
+	var data struct {
+		Staff struct {
+			StaffMedia struct {
+				PageInfo Pagination      `json:"pageInfo"`
+				Nodes    []MangaMetadata `json:"nodes"`
+			} `json:"staffMedia"`
+		} `json:"Staff"`
+	}
+	variables := map[string]any{"staffId": staffID, "page": page, "perPage": perPage}
+	if err := c.execute(ctx, MangaByStaffQuery, variables, &data); err != nil {
+		return nil, err
+	}
+	return &MangaSearchResult{PageInfo: data.Staff.StaffMedia.PageInfo, Manga: data.Staff.StaffMedia.Nodes}, nil
 }
 
 // GetMangaByID retrieves public metadata for one AniList manga media ID.

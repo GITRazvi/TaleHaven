@@ -18,6 +18,10 @@ passwords.
 - Read and send messages with periodic refresh.
 - Keep invite-only rooms out of public discovery.
 - Let the room owner switch existing rooms between public and invite-only.
+- Keep the room-creation form collapsed by default behind a clear Create
+  chatroom button, so browsing rooms remains the primary view.
+- Keep all per-room management controls inside a collapsed creator-only Room
+  settings panel.
 
 ## API and data changes
 
@@ -46,6 +50,49 @@ passwords.
    cards and the conversation header.
 3. Let members attach one image to a message, optionally with text, and render
    it safely in the conversation.
+4. Replace the visible message file picker with paste-to-attach behavior in
+   the message box, while keeping an explicit remove action before sending.
+
+### Keyboard message sending extension
+
+1. Submit a chat message when Enter is pressed in the message box.
+2. Preserve Shift+Enter for composing a new line and do not submit while an
+   input-method composition is active.
+3. Add focused coverage for both keyboard paths.
+
+### Conversation follow extension
+
+1. Open a room at its newest message and keep following the conversation as
+   new messages arrive.
+2. Detect when the reader scrolls away from the bottom and preserve that
+   position during polling updates.
+3. Resume following when the reader returns to the latest message and cover
+   the behavior with a focused test.
+
+### Message actions extension
+
+1. Show a compact three-dot actions menu only for messages authored by the
+   signed-in user.
+2. Add a Delete action that removes the message immediately after the protected
+   server request succeeds, leaving room for future menu actions.
+3. Cover author-only visibility and deletion behavior.
+
+### Replies and reporting extension
+
+1. Put Reply in every message's three-dot menu, keep Delete for the author,
+   and add Report for other members' messages.
+2. Show the selected parent message above the composer and persist/show a
+   compact reply reference when the new message is posted.
+3. Collect a required written report reason in a modal before sending the
+   protected report request, with clear success and failure feedback.
+
+### Reply navigation extension
+
+1. Give each rendered message a stable DOM anchor based on its message ID.
+2. Store the source message ID with a reply reference and make that reference
+   clickable so it scrolls the original message into view.
+3. Preserve existing reply, deletion, reporting, and auto-scroll behaviour;
+   add focused frontend coverage for reply navigation where practical.
 
 ## Validation
 
@@ -73,3 +120,53 @@ passwords.
   optional text caption; attached images open at their full size.
 - Validation passed: all 46 frontend tests, production build, and a rebuilt
   frontend serving `/chat` successfully.
+- Room creation is now opened on demand from a Create chatroom button and can
+  be cancelled without affecting the room browser.
+- Room access, invitations, cover image, palette, custom color, and theme
+  background image are now hidden behind a Room settings button visible only
+  to the room creator.
+- Validation passed: 47 frontend tests, production build, and rebuilt
+  frontend serving a chatroom route successfully.
+- Validation passed: all 46 frontend tests, production build, and rebuilt
+  frontend serving `/chat` successfully.
+- Message images can now be pasted directly into the message box; the file
+  chooser is removed from the normal chat interface.
+- Validation passed: 48 frontend tests, production build, and rebuilt
+  frontend serving a chatroom route successfully.
+- Chat messages now send with Enter; Shift+Enter creates a new line, including
+  safe handling for active input-method composition.
+- Validation passed: 49 frontend tests and the production build.
+- Rooms now open at the newest message and remain there through message/image
+  updates until the reader scrolls upward; following resumes when they return
+  to the bottom.
+- Validation passed: 50 frontend tests and the production build.
+- Messages authored by the signed-in user now have a three-dot actions menu
+  with Delete. Successful deletion immediately removes that message from the
+  conversation; other members' messages expose no action menu.
+- Validation passed: 51 frontend tests and the production build.
+- Every message now exposes Reply from its three-dot menu. The selected message
+  is shown above the composer and sent as a compact quoted reference.
+- Other members' message menus also expose Report, which requires a written
+  reason before submission; a user’s own messages retain Delete instead.
+- Validation passed: all 51 frontend tests and the production build.
+- A reply reference now stores the source message ID and is rendered as a
+  clickable control. Selecting it smoothly scrolls the original message into
+  view; an unavailable source is clearly labelled.
+- Validation passed: focused chatroom coverage, all 52 frontend tests, and the
+  production build.
+
+### Chat author profile preview
+
+1. Make the visible message author name a hover- and keyboard-focus trigger.
+2. Present a compact preview whose profile image fills the card and whose name
+   overlays the image; use an initial-based fallback when no image exists.
+3. Keep the preview non-interactive and avoid adding any profile details beyond
+   the public name and photo.
+
+## Implementation status
+
+- Hovering or keyboard-focusing a message author's name now opens a compact
+  profile preview. The portrait fills the preview and the display name overlays
+  its top edge; a letter avatar is used when no photo exists.
+- Validation passed: focused chatroom coverage, all 53 frontend tests, and the
+  production build.
