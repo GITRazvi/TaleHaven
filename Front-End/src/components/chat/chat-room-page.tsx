@@ -2,7 +2,7 @@ import React, { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, use
 import { Alert, Badge, Button, Card, Container, Dropdown, Form, Modal, OverlayTrigger, Popover, Spinner } from 'react-bootstrap';
 import { Link, useParams } from 'react-router-dom';
 import Backend from '../../app/clients/backend/backend';
-import { ChatMessage, ChatRoom, DisplayTheme } from '../../app/clients/backend/types';
+import { ChatMessage, ChatRoom, ChatRoomMember, ChatRoomMemberDirectoryEntry, DisplayTheme } from '../../app/clients/backend/types';
 import { customThemeStyle, presentationThemeStyle, themeBackgroundStyle } from '../../app/theme-style';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -45,6 +45,7 @@ const ChatRoomPage: React.FC = () => {
     const [inviteLink, setInviteLink] = useState<string | null>(null);
     const [creatingInvite, setCreatingInvite] = useState(false);
     const [changingVisibility, setChangingVisibility] = useState(false);
+	const [changingMute, setChangingMute] = useState(false);
     const [roomImage, setRoomImage] = useState<File | null>(null);
     const [roomImageInputKey, setRoomImageInputKey] = useState(0);
     const [uploadingRoomImage, setUploadingRoomImage] = useState(false);
@@ -55,6 +56,13 @@ const ChatRoomPage: React.FC = () => {
     const [themeImage, setThemeImage] = useState<File | null>(null);
     const [themeImageInputKey, setThemeImageInputKey] = useState(0);
     const [showRoomSettings, setShowRoomSettings] = useState(false);
+	const [showRoomMembers, setShowRoomMembers] = useState(false);
+	const [memberDirectory, setMemberDirectory] = useState<ChatRoomMemberDirectoryEntry[]>([]);
+	const [roomMembers, setRoomMembers] = useState<ChatRoomMember[]>([]);
+	const [membersLoading, setMembersLoading] = useState(false);
+	const [moderatorActionUserID, setModeratorActionUserID] = useState<number | null>(null);
+	const [banTarget, setBanTarget] = useState<{ userId: number; displayName: string } | null>(null);
+	const [banning, setBanning] = useState(false);
     const [followingNewestMessage, setFollowingNewestMessage] = useState(true);
     const messageListRef = useRef<HTMLDivElement>(null);
 
@@ -66,7 +74,7 @@ const ChatRoomPage: React.FC = () => {
 
     const authorPreview = (message: ChatMessage) => {
         const initial = message.authorDisplayName.trim().charAt(0).toUpperCase() || 'R';
-        return <OverlayTrigger trigger={['hover', 'focus']} placement="right" overlay={<Popover className="chat-author-preview"><Popover.Body>{message.profileImagePath ? <img src={imageUrl(message.profileImagePath)} alt={`${message.authorDisplayName}'s profile`} /> : <div className="chat-author-preview-fallback" aria-hidden="true">{initial}</div>}<span>{message.authorDisplayName}</span></Popover.Body></Popover>}><button type="button" className="chat-author-name">{message.authorDisplayName}</button></OverlayTrigger>;
+        return <OverlayTrigger trigger={['hover', 'focus']} placement="right" overlay={<Popover className="chat-author-preview"><Popover.Body>{message.profileImagePath ? <img src={imageUrl(message.profileImagePath)} alt={`${message.authorDisplayName}'s profile`} /> : <div className="chat-author-preview-fallback" aria-hidden="true">{initial}</div>}<span>{message.authorDisplayName}</span></Popover.Body></Popover>}><Link to={`/profile/${message.userId}`} className="chat-author-name">{message.authorDisplayName}</Link></OverlayTrigger>;
     };
 
     const loadMessages = useCallback(async () => {
@@ -169,6 +177,40 @@ const ChatRoomPage: React.FC = () => {
         };
     }, [room, imageUrl]);
 
+	const loadRoomMembers = useCallback(async () => {
+		if (!room?.isOwner) return;
+		setMembersLoading(true);
+		try {
+			const response = await backend.getChatRoomMembers(parsedRoomID);
+			setRoomMembers(response.data);
+		} catch (requestError) {
+			setError(requestError instanceof Error ? requestError.message : 'Unable to load room members.');
+		} finally {
+			setMembersLoading(false);
+		}
+	}, [backend, parsedRoomID, room?.isOwner]);
+
+	const loadMemberDirectory = useCallback(async () => {
+		if (!room?.isMember) return;
+		setMembersLoading(true);
+		try {
+			const response = await backend.getChatRoomMemberDirectory(parsedRoomID);
+			setMemberDirectory(response.data);
+		} catch (requestError) {
+			setError(requestError instanceof Error ? requestError.message : 'Unable to load room members.');
+		} finally {
+			setMembersLoading(false);
+		}
+	}, [backend, parsedRoomID, room?.isMember]);
+
+	useEffect(() => {
+		if (showRoomSettings && room?.isOwner) void loadRoomMembers();
+	}, [loadRoomMembers, room?.isOwner, showRoomSettings]);
+
+	useEffect(() => {
+		if (showRoomMembers) void loadMemberDirectory();
+	}, [loadMemberDirectory, showRoomMembers]);
+
     const sendMessage = async (event: FormEvent) => {
         event.preventDefault();
         const value = body.trim();
@@ -223,6 +265,37 @@ const ChatRoomPage: React.FC = () => {
             setDeletingMessageID(null);
         }
     };
+
+	const updateModerator = async (member: ChatRoomMember) => {
+		setModeratorActionUserID(member.userId);
+		try {
+			const response = member.isModerator
+				? await backend.removeChatRoomModerator(parsedRoomID, member.userId)
+				: await backend.addChatRoomModerator(parsedRoomID, member.userId);
+			setRoomMembers(response.data);
+			setNotice(`${member.displayName} is ${member.isModerator ? 'no longer a moderator' : 'now a moderator'}.`);
+		} catch (requestError) {
+			setError(requestError instanceof Error ? requestError.message : 'Unable to update moderator.');
+		} finally {
+			setModeratorActionUserID(null);
+		}
+	};
+
+	const banMember = async () => {
+		if (!banTarget) return;
+		setBanning(true);
+		try {
+			await backend.banChatRoomMember(parsedRoomID, banTarget.userId);
+			setMessages((current) => current.filter((message) => message.userId !== banTarget.userId));
+			setRoomMembers((current) => current.filter((member) => member.userId !== banTarget.userId));
+			setNotice(`${banTarget.displayName} was permanently banned from this chatroom.`);
+			setBanTarget(null);
+		} catch (requestError) {
+			setError(requestError instanceof Error ? requestError.message : 'Unable to ban this member.');
+		} finally {
+			setBanning(false);
+		}
+	};
 
     const submitReport = async (event: FormEvent) => {
         event.preventDefault();
@@ -327,13 +400,27 @@ const ChatRoomPage: React.FC = () => {
         }
     };
 
+	const toggleMuted = async () => {
+		if (!room) return;
+		setChangingMute(true);
+		try {
+			const response = await backend.updateChatRoomNotifications(parsedRoomID, !room.isMuted);
+			setRoom(response.room);
+			setError(null);
+		} catch (requestError) {
+			setError(requestError instanceof Error ? requestError.message : 'Unable to update chatroom notifications.');
+		} finally {
+			setChangingMute(false);
+		}
+	};
+
     if (loading) return <Container className="py-5" role="status"><Spinner animation="border" size="sm" className="me-2" />Opening chatroom…</Container>;
     if (!room) return <Container className="py-5"><Alert variant="danger">{error || 'This chatroom is unavailable.'}</Alert><Link className="btn btn-outline-primary" to="/chat">Back to chatrooms</Link></Container>;
 
     return <Container className={`py-4 py-md-5 chat-room-page chat-room-theme-${room.theme || 'midnight'}${room.themeImagePath ? ' theme-has-image' : ''}`} style={presentationThemeStyle(room.customThemeColor, imageUrl(room.themeImagePath))}>
         <div className="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
-            <div><Link to="/chat" className="d-inline-block mb-2">← All chatrooms</Link><div className="d-flex align-items-start gap-3"><div className="chat-room-cover chat-room-cover-placeholder">{room.imagePath ? <img src={imageUrl(room.imagePath)} alt={`Cover for ${room.name}`} /> : '💬'}</div><div><div className="d-flex gap-2 align-items-center"><h1 className="h2 mb-0">{room.name}</h1><Badge bg={room.visibility === 'public' ? 'success' : 'secondary'}>{room.visibility === 'public' ? 'Public' : 'Private'}</Badge></div><p className="text-muted mb-0 mt-2">{room.memberCount} {room.memberCount === 1 ? 'member' : 'members'} · Created by {room.ownerDisplayName}</p></div></div></div>
-            {room.isOwner && <Button variant="outline-primary" onClick={() => setShowRoomSettings((current) => !current)} aria-expanded={showRoomSettings} aria-controls="chat-room-settings">{showRoomSettings ? 'Close settings' : 'Room settings'}</Button>}
+            <div><Link to="/chat" className="d-inline-block mb-2">← All chatrooms</Link><div className="d-flex align-items-start gap-3"><div className="chat-room-cover chat-room-cover-placeholder">{room.imagePath ? <img src={imageUrl(room.imagePath)} alt={`Cover for ${room.name}`} /> : '💬'}</div><div><div className="d-flex gap-2 align-items-center"><h1 className="h2 mb-0">{room.name}</h1><Badge bg={room.visibility === 'public' ? 'success' : 'secondary'}>{room.visibility === 'public' ? 'Public' : 'Private'}</Badge></div><p className="text-muted mb-0 mt-2">{room.memberCount} {room.memberCount === 1 ? 'member' : 'members'} · Created by <Link to={`/profile/${room.ownerUserId}`} className="chat-author-name">{room.ownerDisplayName}</Link></p></div></div></div>
+            <div className="d-flex flex-wrap gap-2"><Button variant="outline-primary" onClick={() => setShowRoomMembers(true)} aria-haspopup="dialog">Members ({room.memberCount})</Button><Button variant={room.isMuted ? 'secondary' : 'outline-secondary'} onClick={() => void toggleMuted()} disabled={changingMute}>{changingMute ? 'Saving…' : room.isMuted ? 'Unmute room' : 'Mute room'}</Button>{room.isOwner && <Button variant="outline-primary" onClick={() => setShowRoomSettings((current) => !current)} aria-expanded={showRoomSettings} aria-controls="chat-room-settings">{showRoomSettings ? 'Close settings' : 'Room settings'}</Button>}</div>
         </div>
 
         {error && <Alert variant="danger">{error}</Alert>}
@@ -345,18 +432,24 @@ const ChatRoomPage: React.FC = () => {
             <h3 className="h6">Access and invitations</h3>
             <div className="d-flex flex-wrap gap-2"><Button variant="outline-primary" onClick={() => void toggleVisibility()} disabled={changingVisibility}>{changingVisibility ? 'Saving access…' : room.visibility === 'public' ? 'Make private' : 'Make public'}</Button><Button variant="outline-primary" onClick={() => void createInvite()} disabled={creatingInvite}>{creatingInvite ? 'Creating invite…' : 'Create invite link'}</Button></div>
             {inviteLink && <Alert className="mt-3 mb-0" variant="info"><strong>Invite link ready.</strong> It has been copied when your browser allows it.<Form.Control className="mt-2" aria-label="Invite link" readOnly value={inviteLink} onFocus={(event) => event.currentTarget.select()} /></Alert>}
+			<hr />
+			<h3 className="h6">Moderators</h3>
+			<p className="text-muted small">Moderators can delete ordinary members’ messages and permanently ban ordinary members. They cannot moderate you or other moderators.</p>
+			{membersLoading ? <Spinner animation="border" size="sm" /> : <div className="d-grid gap-2">{roomMembers.map((member) => <div key={member.userId} className="d-flex flex-wrap align-items-center gap-2 border rounded p-2"><Link to={`/profile/${member.userId}`} className="chat-author-name me-auto">{member.displayName}</Link>{member.isOwner ? <Badge bg="primary">Owner</Badge> : <>{member.isModerator && <Badge bg="success">Moderator</Badge>}<Button size="sm" variant={member.isModerator ? 'outline-secondary' : 'outline-primary'} disabled={moderatorActionUserID === member.userId} onClick={() => void updateModerator(member)}>{moderatorActionUserID === member.userId ? 'Saving…' : member.isModerator ? 'Remove moderator' : 'Make moderator'}</Button><Button size="sm" variant="outline-danger" onClick={() => setBanTarget({ userId: member.userId, displayName: member.displayName })}>Ban</Button></>}</div>)}</div>}
             <hr />
             <Form.Label htmlFor="chat-room-image" className="mb-1">Room image</Form.Label><div className="d-flex flex-wrap align-items-center gap-2"><Form.Control key={roomImageInputKey} id="chat-room-image" className="chat-image-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setRoomImage((event.currentTarget as HTMLInputElement).files?.[0] || null)} /><Button variant="outline-primary" onClick={() => void uploadRoomImage()} disabled={!roomImage || uploadingRoomImage}>{uploadingRoomImage ? 'Uploading…' : 'Upload image'}</Button></div><p className="text-muted small mb-0 mt-2">JPEG, PNG, or WebP · up to 5 MB. Replacing the image removes the old one.</p>
             <hr />
-            <Form.Label htmlFor="chat-room-theme" className="mb-1">Chatroom theme</Form.Label><div className="d-flex flex-wrap align-items-center gap-2"><Form.Select id="chat-room-theme" className="chat-theme-select" value={themeDraft} disabled={savingTheme} onChange={(event) => { setThemeDraft(event.target.value as DisplayTheme); setUseCustomThemeColor(false); }}>{chatThemeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</Form.Select><Button variant="outline-primary" onClick={() => void saveRoomTheme()} disabled={savingTheme || (themeDraft === room.theme && (useCustomThemeColor ? customThemeColor : '') === room.customThemeColor)}>{savingTheme ? 'Saving theme…' : 'Save theme'}</Button></div><Form.Group className="mt-3" controlId="chat-room-custom-theme-color"><Form.Label className="small">Custom color</Form.Label><div className="d-flex align-items-center gap-2"><Form.Control type="color" value={customThemeColor} disabled={savingTheme} onChange={(event) => { setCustomThemeColor(event.target.value); setUseCustomThemeColor(true); }} aria-label="Custom chatroom theme color" /><span className="font-monospace text-uppercase">{customThemeColor}</span></div><Form.Text className="text-muted">Picking a color activates a custom room palette for every member.</Form.Text></Form.Group><Form.Group className="mt-3" controlId="chat-room-theme-image"><Form.Label className="small">Theme background image</Form.Label><div className="d-flex flex-wrap align-items-center gap-2"><Form.Control key={themeImageInputKey} className="theme-image-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={savingTheme} onChange={(event) => setThemeImage((event.target as HTMLInputElement).files?.[0] ?? null)} /><Button variant="outline-primary" onClick={() => void uploadRoomThemeImage()} disabled={!themeImage || savingTheme}>{savingTheme ? 'Uploading…' : 'Upload image'}</Button>{room.themeImagePath && <Button variant="outline-secondary" onClick={() => void removeRoomThemeImage()} disabled={savingTheme}>Remove image</Button>}</div><Form.Text className="text-muted">JPEG, PNG, WebP, or animated GIF up to 5 MB. GIFs play as backgrounds. A 1920 × 1080 image works best and replaces the current background.</Form.Text></Form.Group>
+            <Form.Label htmlFor="chat-room-theme" className="mb-1">Chatroom theme</Form.Label><div className="d-flex flex-wrap align-items-center gap-2"><Form.Select id="chat-room-theme" className="chat-theme-select" value={themeDraft} disabled={savingTheme} onChange={(event) => { setThemeDraft(event.target.value as DisplayTheme); setUseCustomThemeColor(false); }}>{chatThemeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</Form.Select><Button variant="outline-primary" onClick={() => void saveRoomTheme()} disabled={savingTheme || (themeDraft === room.theme && (useCustomThemeColor ? customThemeColor : '') === room.customThemeColor)}>{savingTheme ? 'Saving theme…' : 'Save theme'}</Button></div><Form.Group className="mt-3" controlId="chat-room-custom-theme-color"><Form.Label className="small">Custom color</Form.Label><div className="d-flex align-items-center gap-2"><Form.Control type="color" value={customThemeColor} disabled={savingTheme} onChange={(event) => { setCustomThemeColor(event.target.value); setUseCustomThemeColor(true); }} aria-label="Custom chatroom theme color" /><span className="font-monospace text-uppercase">{customThemeColor}</span></div><Form.Text className="text-muted">Picking a color activates a custom room palette for every member.</Form.Text></Form.Group><Form.Group className="mt-3" controlId="chat-room-theme-image"><Form.Label className="small">Theme background image</Form.Label><div className="d-flex flex-wrap align-items-center gap-2"><Form.Control key={themeImageInputKey} className="theme-image-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={savingTheme} onChange={(event) => setThemeImage((event.target as HTMLInputElement).files?.[0] ?? null)} /><Button variant="outline-primary" onClick={() => void uploadRoomThemeImage()} disabled={!themeImage || savingTheme}>{savingTheme ? 'Uploading…' : 'Upload image'}</Button>{room.themeImagePath && <Button variant="outline-secondary" onClick={() => void removeRoomThemeImage()} disabled={savingTheme}>Remove image</Button>}</div><Form.Text className="text-muted">JPEG, PNG, WebP, or animated GIF up to 15 MB. GIFs play as backgrounds. A 1920 × 1080 image works best and replaces the current background.</Form.Text></Form.Group>
         </Card.Body></Card>}
 
         <Card className="chat-messages-card shadow-sm"><Card.Body ref={messageListRef} className="chat-messages-list" aria-live="polite" onScroll={handleMessageListScroll}>
-            {messages.length === 0 ? <p className="text-muted mb-0">No messages yet. Start the conversation.</p> : messages.map((message) => { const parent = messages.find((candidate) => candidate.id === message.replyToMessageId); return <article key={message.id} data-chat-message-id={message.id} className="chat-message"><div className="d-flex justify-content-between gap-3">{authorPreview(message)}<div className="d-flex align-items-center gap-2"><time className="text-muted small" dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleString()}</time><Dropdown align="end"><Dropdown.Toggle size="sm" variant="link" className="chat-message-actions p-0 border-0" aria-label={`Message actions for ${message.body || 'image message'}`}>•••</Dropdown.Toggle><Dropdown.Menu><Dropdown.Item onClick={() => setReplyToMessage(message)}>Reply</Dropdown.Item>{message.userId === user?.id ? <Dropdown.Item className="text-danger" onClick={() => void deleteMessage(message)} disabled={deletingMessageID === message.id}>{deletingMessageID === message.id ? 'Deleting…' : 'Delete'}</Dropdown.Item> : <Dropdown.Item className="text-warning" onClick={() => { setReportMessage(message); setReportReason(''); }}>Report</Dropdown.Item>}</Dropdown.Menu></Dropdown></div></div>{message.replyToMessageId > 0 && <Button variant="link" className="chat-reply-reference p-0 mt-1 text-start" onClick={() => scrollToMessage(message.replyToMessageId)} disabled={!parent} aria-label={parent ? `View replied message from ${parent.authorDisplayName}` : 'Original replied message is unavailable'}>{parent ? <>↪ {parent.authorDisplayName}: {parent.body || 'Image message'}</> : '↪ Original message is unavailable'}</Button>}{message.body && <p className="mb-0 mt-1">{message.body}</p>}{message.imagePath && <a href={imageUrl(message.imagePath)} target="_blank" rel="noreferrer"><img className="chat-message-image mt-2" src={imageUrl(message.imagePath)} alt={`Shared by ${message.authorDisplayName}`} onLoad={scrollToNewestMessage} /></a>}</article>; })}
+            {messages.length === 0 ? <p className="text-muted mb-0">No messages yet. Start the conversation.</p> : messages.map((message) => { const parent = messages.find((candidate) => candidate.id === message.replyToMessageId); const canModerate = (room.isOwner || room.isModerator) && message.userId !== user?.id; return <article key={message.id} data-chat-message-id={message.id} className="chat-message"><div className="d-flex justify-content-between gap-3">{authorPreview(message)}<div className="d-flex align-items-center gap-2"><time className="text-muted small" dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleString()}</time><Dropdown align="end"><Dropdown.Toggle size="sm" variant="link" className="chat-message-actions p-0 border-0" aria-label={`Message actions for ${message.body || 'image message'}`}>•••</Dropdown.Toggle><Dropdown.Menu><Dropdown.Item onClick={() => setReplyToMessage(message)}>Reply</Dropdown.Item>{message.userId === user?.id ? <Dropdown.Item className="text-danger" onClick={() => void deleteMessage(message)} disabled={deletingMessageID === message.id}>{deletingMessageID === message.id ? 'Deleting…' : 'Delete'}</Dropdown.Item> : <><Dropdown.Item className="text-warning" onClick={() => { setReportMessage(message); setReportReason(''); }}>Report</Dropdown.Item>{canModerate && <><Dropdown.Divider /><Dropdown.Item className="text-danger" onClick={() => void deleteMessage(message)} disabled={deletingMessageID === message.id}>{deletingMessageID === message.id ? 'Deleting…' : 'Delete message'}</Dropdown.Item><Dropdown.Item className="text-danger" onClick={() => setBanTarget({ userId: message.userId, displayName: message.authorDisplayName })}>Ban from room</Dropdown.Item></>}</>}</Dropdown.Menu></Dropdown></div></div>{message.replyToMessageId > 0 && <Button variant="link" className="chat-reply-reference p-0 mt-1 text-start" onClick={() => scrollToMessage(message.replyToMessageId)} disabled={!parent} aria-label={parent ? `View replied message from ${parent.authorDisplayName}` : 'Original replied message is unavailable'}>{parent ? <>↪ {parent.authorDisplayName}: {parent.body || 'Image message'}</> : '↪ Original message is unavailable'}</Button>}{message.body && <p className="mb-0 mt-1">{message.body}</p>}{message.imagePath && <a href={imageUrl(message.imagePath)} target="_blank" rel="noreferrer"><img className="chat-message-image mt-2" src={imageUrl(message.imagePath)} alt={`Shared by ${message.authorDisplayName}`} onLoad={scrollToNewestMessage} /></a>}</article>; })}
         </Card.Body></Card>
 
         <Form className="mt-3" onSubmit={sendMessage}>{replyToMessage && <Alert variant="secondary" className="py-2 d-flex justify-content-between align-items-center">Replying to <strong>{replyToMessage.authorDisplayName}</strong><Button size="sm" variant="link" onClick={() => setReplyToMessage(null)}>Cancel</Button></Alert>}<Form.Label htmlFor="chat-message">Message</Form.Label><div className="d-flex gap-2"><Form.Control as="textarea" id="chat-message" rows={2} maxLength={2000} value={body} placeholder="Write a message or paste an image…" onChange={(event) => setBody(event.target.value)} onKeyDown={handleMessageKeyDown} onPaste={attachPastedImage} /><Button type="submit" disabled={sending || (!body.trim() && !messageImage)}>{sending ? 'Sending…' : 'Send'}</Button></div>{messageImage && <div className="d-flex align-items-center gap-2 mt-2"><p className="text-muted small mb-0">Pasted image attached: {messageImage.name || 'image'}</p><Button size="sm" variant="outline-secondary" onClick={() => setMessageImage(null)}>Remove image</Button></div>}<Form.Text className="text-muted">Press Enter to send, Shift+Enter for a new line. Paste an image directly into the message box to attach it.</Form.Text></Form>
+        <Modal show={showRoomMembers} onHide={() => setShowRoomMembers(false)} centered scrollable><Modal.Header closeButton><Modal.Title>Members · {room.memberCount}</Modal.Title></Modal.Header><Modal.Body>{membersLoading ? <div className="text-center py-4"><Spinner animation="border" size="sm" className="me-2" />Loading members…</div> : memberDirectory.length === 0 ? <p className="text-muted mb-0">No members were found.</p> : <div className="d-grid gap-2">{memberDirectory.map((member) => <Link key={member.userId} to={`/profile/${member.userId}`} className="chat-author-name border rounded p-2" onClick={() => setShowRoomMembers(false)}>{member.displayName}</Link>)}</div>}</Modal.Body><Modal.Footer><Button variant="outline-secondary" onClick={() => setShowRoomMembers(false)}>Close</Button></Modal.Footer></Modal>
         <Modal show={reportMessage !== null} onHide={() => !reporting && setReportMessage(null)} centered><Form onSubmit={submitReport}><Modal.Header closeButton><Modal.Title>Report message</Modal.Title></Modal.Header><Modal.Body><p className="text-muted">Tell us why you are reporting this message from {reportMessage?.authorDisplayName}.</p><Form.Control as="textarea" rows={4} maxLength={500} required value={reportReason} onChange={(event) => setReportReason(event.target.value)} placeholder="Describe the issue…" aria-label="Report reason" /></Modal.Body><Modal.Footer><Button variant="outline-secondary" onClick={() => setReportMessage(null)} disabled={reporting}>Cancel</Button><Button variant="danger" type="submit" disabled={reporting || !reportReason.trim()}>{reporting ? 'Sending…' : 'Submit report'}</Button></Modal.Footer></Form></Modal>
+		<Modal show={banTarget !== null} onHide={() => !banning && setBanTarget(null)} centered><Modal.Header closeButton><Modal.Title>Ban member permanently</Modal.Title></Modal.Header><Modal.Body><p className="mb-0">Ban <strong>{banTarget?.displayName}</strong> from this chatroom? This removes their access now and prevents them from joining again, including through an invite link.</p></Modal.Body><Modal.Footer><Button variant="outline-secondary" onClick={() => setBanTarget(null)} disabled={banning}>Cancel</Button><Button variant="danger" onClick={() => void banMember()} disabled={banning}>{banning ? 'Banning…' : 'Ban permanently'}</Button></Modal.Footer></Modal>
     </Container>;
 };
 

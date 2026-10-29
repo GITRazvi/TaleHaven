@@ -17,6 +17,11 @@ data needed for a polished My Profile dashboard.
   registration, and `/auth/me` user responses.
 - Reuse the existing protected library statistics, favorites, and reading
   status data; no duplicate dashboard tables are needed.
+- Expose a signed-in public-profile route that returns only display identity
+  fields needed when a chatroom member is selected: ID, display name, profile
+  image path, and joined date.
+- Allow a profile owner to turn profile comments on or off. When enabled,
+  signed-in readers can leave short comments using their safe public identity.
 
 ## API and Data Changes
 
@@ -25,6 +30,11 @@ data needed for a polished My Profile dashboard.
 - `POST /profile/photo` accepts multipart field `photo` and returns the
   updated safe user profile.
 - `users` gains `display_name` and `profile_image_path` columns.
+- `GET /profiles/:userID` returns a safe public profile without email, role,
+  library, favorites, or presentation/settings data.
+- `GET/POST/DELETE /profiles/:userID/comments` lists, creates, and removes
+  profile comments. Authors may delete their own entries; profile owners may
+  remove any entry on their own page.
 
 ## Implementation Steps
 
@@ -34,6 +44,10 @@ data needed for a polished My Profile dashboard.
 4. Validate image size/type, generate server-owned filenames, and avoid raw
    upload filenames or arbitrary file paths.
 5. Add database coverage for profile updates and retain user isolation.
+6. Validate public-profile IDs and keep the public response explicitly limited
+   to non-sensitive identity fields.
+7. Add profile-comment storage, the owner-only enable setting, and scoped
+   deletion authorization.
 
 ## Validation
 
@@ -59,6 +73,24 @@ data needed for a polished My Profile dashboard.
 - After the final rebuild, a disposable live flow verified registration,
   display-name update, image upload/retrieval, account deletion, and image
   removal. The backend started successfully with the profile migration.
+- Added the protected `GET /profiles/:userID` route for read-only member
+  identity. It validates the ID and returns only ID, display name, profile
+  image path, and joined date; controller coverage confirms account fields
+  such as email, role, and password never appear in this response.
+- Controller tests pass and the rebuilt backend is running on port 3001. The
+  standalone database package test was invoked before restart but is blocked
+  in this Windows environment because the forwarded PostgreSQL port 5433
+  denies the host test process; the containerized backend connected and
+  completed migrations successfully.
+- Added `profile_comments_enabled` (defaulting to enabled) and a
+  `profile_comments` table with indexed, newest-first profile discussion
+  retrieval. Profile owners can toggle the setting; signed-in users can post
+  up to 1,000 characters while enabled, and only the author or profile owner
+  may delete a comment. Comment reads expose only safe author identity.
+- Controller tests pass for the profile controller. The required standalone
+  database test is recorded above as blocked by the host PostgreSQL port
+  restriction. The rebuilt backend connected to PostgreSQL, applied the
+  `profile_comments` migration, and is running on port 3001.
 
 ## Follow-up
 

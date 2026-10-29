@@ -24,14 +24,18 @@ describe('GuidedRecommendationChat', () => {
     mockedBackend.mockImplementation(() => ({ searchAniListManga, getAniListMyLibrary, getAniListMangaDetails }));
   });
 
-  it('turns a preset genre answer into a score-sorted AniList search', async () => {
+  it('turns selected guided genre buttons into a multi-genre AniList search', async () => {
     render(<GuidedRecommendationChat />, { wrapper: MemoryRouter });
 
     await userEvent.click(screen.getByRole('button', { name: 'A genre' }));
     await userEvent.click(screen.getByRole('button', { name: 'Action' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Romance' }));
+    expect(screen.getByRole('button', { name: 'Action' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Romance' })).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Show recommendations' }));
 
     expect(await screen.findByRole('img', { name: 'Cover for Action Pick' })).toBeInTheDocument();
-    expect(searchAniListManga).toHaveBeenCalledWith({ genre: 'Action', page: 1, perPage: 12, sort: 'SCORE_DESC' });
+    expect(searchAniListManga).toHaveBeenCalledWith({ genres: ['Action', 'Romance'], page: 1, perPage: 12, sort: 'SCORE_DESC' });
   });
 
   it('omits titles already in the signed-in reader’s library', async () => {
@@ -47,9 +51,30 @@ describe('GuidedRecommendationChat', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'A genre' }));
     await userEvent.click(screen.getByRole('button', { name: 'Action' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Show recommendations' }));
 
     expect(await screen.findByText('New Pick')).toBeInTheDocument();
     expect(screen.queryByText('Saved Pick')).not.toBeInTheDocument();
+  });
+
+  it('uses a signed-in reader\'s most-read completed genre for Surprise me', async () => {
+    mockedUseAuth.mockReturnValue({ user: { id: 1, email: 'reader@example.test', role: 'user', displayName: 'Reader', profileImagePath: '', created_at: '' }, loading: false, sessionExpired: false } as ReturnType<typeof useAuth>);
+    getAniListMyLibrary.mockResolvedValue({ data: [], stats: { topGenres: ['Fantasy'] } });
+    render(<GuidedRecommendationChat />, { wrapper: MemoryRouter });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Surprise me' })).not.toBeDisabled());
+    await userEvent.click(screen.getByRole('button', { name: 'Surprise me' }));
+
+    expect(await screen.findByRole('img', { name: 'Cover for Action Pick' })).toBeInTheDocument();
+    expect(searchAniListManga).toHaveBeenCalledWith({ genre: 'Fantasy', page: 1, perPage: 12, sort: 'SCORE_DESC' });
+  });
+
+  it('uses the selected discovery order for the guided most-popular button', async () => {
+    render(<GuidedRecommendationChat />, { wrapper: MemoryRouter });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Most popular' }));
+    expect(await screen.findByRole('img', { name: 'Cover for Action Pick' })).toBeInTheDocument();
+    expect(searchAniListManga).toHaveBeenLastCalledWith({ page: 1, perPage: 12, sort: 'POPULARITY_DESC' });
   });
 
   it('turns a typed filter request into a multi-genre AniList search', async () => {

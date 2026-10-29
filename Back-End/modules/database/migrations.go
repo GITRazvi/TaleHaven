@@ -369,6 +369,79 @@ func RunMigrations() {
 		WHERE reply_to_message_id > 0;
 	`
 
+	createAniListMangaComments := `
+	CREATE TABLE IF NOT EXISTS anilist_manga_comments (
+		id BIGSERIAL PRIMARY KEY,
+		anilist_id INTEGER NOT NULL CHECK (anilist_id > 0),
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		body VARCHAR(1000) NOT NULL,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE INDEX IF NOT EXISTS idx_anilist_manga_comments_manga_created
+		ON anilist_manga_comments(anilist_id, id DESC);
+	`
+
+	createChatRoomModerationTables := `
+	CREATE TABLE IF NOT EXISTS chat_room_moderators (
+		room_id BIGINT NOT NULL REFERENCES chat_rooms(id) ON DELETE CASCADE,
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		assigned_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (room_id, user_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_chat_room_moderators_user
+		ON chat_room_moderators(user_id, room_id);
+	CREATE TABLE IF NOT EXISTS chat_room_bans (
+		room_id BIGINT NOT NULL REFERENCES chat_rooms(id) ON DELETE CASCADE,
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		banned_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (room_id, user_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_chat_room_bans_user
+		ON chat_room_bans(user_id, room_id);
+	`
+
+	createProfileComments := `
+	ALTER TABLE users
+		ADD COLUMN IF NOT EXISTS profile_comments_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+	CREATE TABLE IF NOT EXISTS profile_comments (
+		id BIGSERIAL PRIMARY KEY,
+		profile_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		body VARCHAR(1000) NOT NULL,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE INDEX IF NOT EXISTS idx_profile_comments_profile_created
+		ON profile_comments(profile_user_id, id DESC);
+	`
+	createNotifications := `
+		CREATE TABLE IF NOT EXISTS user_notifications (
+			id BIGSERIAL PRIMARY KEY,
+			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			type VARCHAR(50) NOT NULL,
+			title VARCHAR(160) NOT NULL,
+			body VARCHAR(500) NOT NULL DEFAULT '',
+			target_path VARCHAR(500) NOT NULL DEFAULT '',
+			read_at TIMESTAMP NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE INDEX IF NOT EXISTS idx_user_notifications_recent
+			ON user_notifications(user_id, id DESC);
+		CREATE INDEX IF NOT EXISTS idx_user_notifications_unread
+			ON user_notifications(user_id, id DESC) WHERE read_at IS NULL;
+	`
+	createChatRoomNotificationPreferences := `
+		CREATE TABLE IF NOT EXISTS chat_room_notification_preferences (
+			room_id BIGINT NOT NULL REFERENCES chat_rooms(id) ON DELETE CASCADE,
+			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			muted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (room_id, user_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_chat_room_notification_preferences_user
+			ON chat_room_notification_preferences(user_id, room_id);
+	`
+
 	// Execute migrations
 	migrations := []struct {
 		name  string
@@ -396,6 +469,11 @@ func RunMigrations() {
 		{"chatrooms", createChatTables},
 		{"chat_message_reports", createChatMessageReports},
 		{"chat_message_reply_target", addChatMessageReplyTarget},
+		{"anilist_manga_comments", createAniListMangaComments},
+		{"chat_room_moderation", createChatRoomModerationTables},
+		{"profile_comments", createProfileComments},
+		{"user_notifications", createNotifications},
+		{"chat_room_notification_preferences", createChatRoomNotificationPreferences},
 	}
 
 	for _, migration := range migrations {

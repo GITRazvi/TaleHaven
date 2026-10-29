@@ -22,7 +22,8 @@ describe('ChatRoomPage', () => {
         const getChatMessages = jest.fn().mockResolvedValue({ result: 'ok', limit: 100, data: [{ id: 1, roomId: 1, userId: 2, authorDisplayName: 'Friend', body: 'Welcome!', imagePath: '/images/chat/messages/welcome.jpg', createdAt: '2026-10-27T00:00:00Z' }] });
         const updateChatRoomVisibility = jest.fn().mockResolvedValue({ result: 'ok', room: { id: 1, name: 'Fantasy talk', visibility: 'public', imagePath: '/images/chat/rooms/fantasy.jpg', theme: 'midnight', customThemeColor: '', ownerUserId: 1, ownerDisplayName: 'Reader', memberCount: 2, isMember: true, isOwner: true, createdAt: '2026-10-27T00:00:00Z' } });
         const updateChatRoomTheme = jest.fn().mockResolvedValue({ result: 'ok', room: { id: 1, name: 'Fantasy talk', visibility: 'public', imagePath: '/images/chat/rooms/fantasy.jpg', theme: 'forest', customThemeColor: '', ownerUserId: 1, ownerDisplayName: 'Reader', memberCount: 2, isMember: true, isOwner: true, createdAt: '2026-10-27T00:00:00Z' } });
-        mockedBackend.mockImplementation(() => ({ getChatRoom, getChatMessages, updateChatRoomVisibility, updateChatRoomTheme, getBaseUrl: () => 'http://localhost:3001' }));
+        const getChatRoomMembers = jest.fn().mockResolvedValue({ result: 'ok', data: [{ userId: 1, displayName: 'Reader', profileImagePath: '', isOwner: true, isModerator: false }, { userId: 2, displayName: 'Friend', profileImagePath: '', isOwner: false, isModerator: false }] });
+        mockedBackend.mockImplementation(() => ({ getChatRoom, getChatMessages, updateChatRoomVisibility, updateChatRoomTheme, getChatRoomMembers, getBaseUrl: () => 'http://localhost:3001' }));
 
         render(<MemoryRouter initialEntries={['/chat/rooms/1']}><Routes><Route path="/chat/rooms/:roomID" element={<ChatRoomPage />} /></Routes></MemoryRouter>);
 
@@ -30,11 +31,14 @@ describe('ChatRoomPage', () => {
         expect(screen.getByRole('img', { name: 'Cover for Fantasy talk' })).toBeInTheDocument();
         expect(screen.getByRole('img', { name: 'Shared by Friend' })).toBeInTheDocument();
         expect(screen.getByText('Welcome!')).toBeInTheDocument();
+        expect(screen.getByRole('link', { name: 'Friend' })).toHaveAttribute('href', '/profile/2');
+        expect(screen.getByRole('link', { name: 'Reader' })).toHaveAttribute('href', '/profile/1');
         expect(screen.getByRole('button', { name: 'Room settings' })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Make public' })).not.toBeInTheDocument();
         await userEvent.click(screen.getByRole('button', { name: 'Room settings' }));
         expect(screen.getByRole('button', { name: 'Make public' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Create invite link' })).toBeInTheDocument();
+		expect(await screen.findByRole('button', { name: 'Make moderator' })).toBeInTheDocument();
 
         await userEvent.click(screen.getByRole('button', { name: 'Make public' }));
 
@@ -49,13 +53,32 @@ describe('ChatRoomPage', () => {
     it('does not show room settings to a member who is not the creator', async () => {
         const getChatRoom = jest.fn().mockResolvedValue({ result: 'ok', room: { id: 2, name: 'Readers', visibility: 'public', imagePath: '', theme: 'midnight', customThemeColor: '', themeImagePath: '', ownerUserId: 1, ownerDisplayName: 'Creator', memberCount: 2, isMember: true, isOwner: false, createdAt: '2026-10-27T00:00:00Z' } });
         const getChatMessages = jest.fn().mockResolvedValue({ result: 'ok', limit: 100, data: [] });
-        mockedBackend.mockImplementation(() => ({ getChatRoom, getChatMessages, getBaseUrl: () => 'http://localhost:3001' }));
+        const getChatRoomMemberDirectory = jest.fn().mockResolvedValue({ result: 'ok', data: [{ userId: 1, displayName: 'Creator' }, { userId: 2, displayName: 'Reader' }] });
+        mockedBackend.mockImplementation(() => ({ getChatRoom, getChatMessages, getChatRoomMemberDirectory, getBaseUrl: () => 'http://localhost:3001' }));
 
         render(<MemoryRouter initialEntries={['/chat/rooms/2']}><Routes><Route path="/chat/rooms/:roomID" element={<ChatRoomPage />} /></Routes></MemoryRouter>);
 
         expect(await screen.findByRole('heading', { name: 'Readers' })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Room settings' })).not.toBeInTheDocument();
         expect(screen.queryByRole('heading', { name: 'Room settings' })).not.toBeInTheDocument();
+        await userEvent.click(screen.getByRole('button', { name: 'Members (2)' }));
+        expect(await screen.findByText('Members · 2')).toBeInTheDocument();
+        expect(getChatRoomMemberDirectory).toHaveBeenCalledWith(2);
+		expect(screen.getAllByRole('link', { name: 'Creator' }).some((link) => link.getAttribute('href') === '/profile/1')).toBe(true);
+    });
+
+    it('lets any room member mute and unmute their future room notifications', async () => {
+        const mutedRoom = { id: 12, name: 'Quiet room', visibility: 'public', imagePath: '', theme: 'midnight', customThemeColor: '', themeImagePath: '', ownerUserId: 2, ownerDisplayName: 'Creator', memberCount: 2, isMember: true, isOwner: false, isMuted: true, createdAt: '2026-10-27T00:00:00Z' };
+        const getChatRoom = jest.fn().mockResolvedValue({ result: 'ok', room: { ...mutedRoom, isMuted: false } });
+        const getChatMessages = jest.fn().mockResolvedValue({ result: 'ok', limit: 100, data: [] });
+        const updateChatRoomNotifications = jest.fn().mockResolvedValue({ result: 'ok', room: mutedRoom });
+        mockedBackend.mockImplementation(() => ({ getChatRoom, getChatMessages, updateChatRoomNotifications, getBaseUrl: () => 'http://localhost:3001' }));
+
+        render(<MemoryRouter initialEntries={['/chat/rooms/12']}><Routes><Route path="/chat/rooms/:roomID" element={<ChatRoomPage />} /></Routes></MemoryRouter>);
+
+        await userEvent.click(await screen.findByRole('button', { name: 'Mute room' }));
+        expect(updateChatRoomNotifications).toHaveBeenCalledWith(12, true);
+        expect(await screen.findByRole('button', { name: 'Unmute room' })).toBeInTheDocument();
     });
 
     it('attaches an image pasted into the message box without rendering a file chooser', async () => {
@@ -147,6 +170,24 @@ describe('ChatRoomPage', () => {
         expect(screen.getByText('Report')).toBeInTheDocument();
     });
 
+	it('lets an owner assign a moderator and lets that moderator delete or ban another members message', async () => {
+		const getChatRoom = jest.fn().mockResolvedValue({ result: 'ok', room: { id: 9, name: 'Moderated room', visibility: 'public', imagePath: '', theme: 'midnight', customThemeColor: '', themeImagePath: '', ownerUserId: 3, ownerDisplayName: 'Creator', memberCount: 3, isMember: true, isOwner: false, isModerator: true, createdAt: '2026-10-27T00:00:00Z' } });
+		const getChatMessages = jest.fn().mockResolvedValue({ result: 'ok', limit: 100, data: [{ id: 22, roomId: 9, userId: 2, authorDisplayName: 'Friend', body: 'Needs moderation', imagePath: '', createdAt: '2026-10-27T00:00:00Z' }] });
+		const deleteChatMessage = jest.fn().mockResolvedValue({ result: 'ok', message: 'Message deleted' });
+		const banChatRoomMember = jest.fn().mockResolvedValue({ result: 'ok', message: 'Member permanently banned' });
+		mockedBackend.mockImplementation(() => ({ getChatRoom, getChatMessages, deleteChatMessage, banChatRoomMember, getBaseUrl: () => 'http://localhost:3001' }));
+
+		render(<MemoryRouter initialEntries={['/chat/rooms/9']}><Routes><Route path="/chat/rooms/:roomID" element={<ChatRoomPage />} /></Routes></MemoryRouter>);
+
+		await userEvent.click(await screen.findByRole('button', { name: 'Message actions for Needs moderation' }));
+		expect(screen.getByText('Delete message')).toBeInTheDocument();
+		await userEvent.click(screen.getByText('Ban from room'));
+		expect(await screen.findByText('Ban member permanently')).toBeInTheDocument();
+		await userEvent.click(screen.getByRole('button', { name: 'Ban permanently' }));
+		await waitFor(() => expect(banChatRoomMember).toHaveBeenCalledWith(9, 2));
+		await waitFor(() => expect(screen.queryByText('Needs moderation')).not.toBeInTheDocument());
+	});
+
     it('jumps to the original message when a reply reference is clicked', async () => {
         const scrollIntoView = jest.fn();
         Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
@@ -167,7 +208,7 @@ describe('ChatRoomPage', () => {
 
         render(<MemoryRouter initialEntries={['/chat/rooms/8']}><Routes><Route path="/chat/rooms/:roomID" element={<ChatRoomPage />} /></Routes></MemoryRouter>);
 
-        await userEvent.hover(await screen.findByRole('button', { name: 'Friend' }));
+        await userEvent.hover(await screen.findByRole('link', { name: 'Friend' }));
         const profileImage = await screen.findByRole('img', { name: "Friend's profile" });
         expect(profileImage).toHaveAttribute('src', 'http://localhost:3001/images/profiles/friend.jpg');
         expect(screen.getAllByText('Friend').length).toBeGreaterThan(1);

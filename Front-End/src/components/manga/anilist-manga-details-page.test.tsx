@@ -269,7 +269,7 @@ describe('AniListMangaDetailsPage', () => {
     const getAniListFavoriteIDs = jest.fn().mockResolvedValue({ data: [] });
     const addAniListMangaToFavorites = jest.fn().mockResolvedValue({ added: true });
     mockedUseAuth.mockReturnValue({ user: { id: 1, email: 'reader@example.test', created_at: '' } } as ReturnType<typeof useAuth>);
-    mockedBackend.mockImplementation(() => ({ getAniListMangaDetails: jest.fn().mockResolvedValue(mangaResponse), getAniListReadingSource, getAniListMangaByGenre: emptyGenreRecommendations(), getAniListMyLibrary, getAniListFavoriteIDs, addAniListMangaToFavorites, getAniListCharacterFavorites, getAniListCharacterDetails, addAniListCharacterToFavorites, updateAniListMangaReadingStatus, updateAniListMangaPersonalRating }));
+    mockedBackend.mockImplementation(() => ({ getAniListMangaDetails: jest.fn().mockResolvedValue(mangaResponse), getAniListReadingSource, getAniListMangaByGenre: emptyGenreRecommendations(), getAniListMyLibrary, getAniListFavoriteIDs, addAniListMangaToFavorites, getAniListCharacterFavorites, getAniListCharacterDetails, addAniListCharacterToFavorites, updateAniListMangaReadingStatus, updateAniListMangaPersonalRating, getAniListMangaComments: jest.fn().mockResolvedValue({ data: [] }) }));
 
     render(<MemoryRouter initialEntries={['/anilist/manga/1']}><Routes><Route path="/anilist/manga/:anilistId" element={<AniListMangaDetailsPage />} /></Routes></MemoryRouter>);
 
@@ -306,6 +306,7 @@ describe('AniListMangaDetailsPage', () => {
       getAniListMyLibrary: jest.fn().mockResolvedValue({ data: [] }),
       getAniListFavoriteIDs: jest.fn().mockResolvedValue({ data: [] }),
       getAniListCharacterFavorites: jest.fn().mockResolvedValue({ data: [] }),
+      getAniListMangaComments: jest.fn().mockResolvedValue({ data: [] }),
       addAniListMangaToMyLibrary,
     }));
 
@@ -316,5 +317,34 @@ describe('AniListMangaDetailsPage', () => {
     await userEvent.click(addButton);
     await waitFor(() => expect(addAniListMangaToMyLibrary).toHaveBeenCalledWith(1));
     expect(await screen.findByRole('button', { name: 'Add Fantasy title to Favorites' })).toBeInTheDocument();
+  });
+
+  it('shows manga comments with links to the authors public profiles and only lets the author delete their own', async () => {
+    const createAniListMangaComment = jest.fn().mockResolvedValue({ comment: { id: 3, anilistId: 1, userId: 1, authorDisplayName: 'Reader', profileImagePath: '', body: 'A new thought', createdAt: '2026-10-28T00:00:00Z' } });
+    mockedUseAuth.mockReturnValue({ user: { id: 1, email: 'reader@example.test', created_at: '' } } as ReturnType<typeof useAuth>);
+    mockedBackend.mockImplementation(() => ({
+      getAniListMangaDetails: jest.fn().mockResolvedValue(mangaResponse),
+      getAniListReadingSource: jest.fn().mockResolvedValue({ available: false }),
+      getAniListMangaByGenre: emptyGenreRecommendations(),
+      getAniListMyLibrary: jest.fn().mockResolvedValue({ data: [] }),
+      getAniListFavoriteIDs: jest.fn().mockResolvedValue({ data: [] }),
+      getAniListCharacterFavorites: jest.fn().mockResolvedValue({ data: [] }),
+      getAniListMangaComments: jest.fn().mockResolvedValue({ data: [
+        { id: 1, anilistId: 1, userId: 2, authorDisplayName: 'Friend', profileImagePath: '', body: 'Great chapter.', createdAt: '2026-10-27T00:00:00Z' },
+        { id: 2, anilistId: 1, userId: 1, authorDisplayName: 'Reader', profileImagePath: '', body: 'My note.', createdAt: '2026-10-27T01:00:00Z' },
+      ] }),
+      createAniListMangaComment,
+      deleteAniListMangaComment: jest.fn().mockResolvedValue({ result: 'ok' }),
+    }));
+
+    render(<MemoryRouter initialEntries={['/anilist/manga/1']}><Routes><Route path="/anilist/manga/:anilistId" element={<AniListMangaDetailsPage />} /></Routes></MemoryRouter>);
+
+    expect((await screen.findByRole('link', { name: 'Friend' }))).toHaveAttribute('href', '/profile/2');
+    expect(screen.getByRole('link', { name: 'Reader' })).toHaveAttribute('href', '/profile/1');
+    expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(1);
+    await userEvent.type(screen.getByRole('textbox', { name: 'Share your thoughts' }), 'A new thought');
+    await userEvent.keyboard('{Enter}');
+    await waitFor(() => expect(createAniListMangaComment).toHaveBeenCalledWith(1, 'A new thought'));
+    expect(await screen.findByText('A new thought')).toBeInTheDocument();
   });
 });

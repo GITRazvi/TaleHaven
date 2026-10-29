@@ -2,8 +2,27 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Card, Col, Form, Modal, Row, Spinner } from 'react-bootstrap';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Backend from '../../app/clients/backend/backend';
-import { AniListMangaSearchParams } from '../../app/clients/backend/types';
+import { AniListMangaSearchParams, MangaDexBrowseItem } from '../../app/clients/backend/types';
 import { ANI_LIST_SEARCH_TAGS } from './anilist-search-tags';
+
+const MANGADEX_BROWSE_PAGE_SIZE = 24;
+const BROWSE_PAGE_NEIGHBOR_COUNT = 2;
+
+type BrowsePageItem = number | 'ellipsis';
+
+const getBrowsePageItems = (currentPage: number, pageCount: number): BrowsePageItem[] => {
+  const pages = new Set<number>([1, pageCount]);
+  const start = Math.max(1, currentPage - BROWSE_PAGE_NEIGHBOR_COUNT);
+  const end = Math.min(pageCount, currentPage + BROWSE_PAGE_NEIGHBOR_COUNT);
+  for (let page = start; page <= end; page += 1) pages.add(page);
+
+  const orderedPages = Array.from(pages).sort((left, right) => left - right);
+  return orderedPages.reduce<BrowsePageItem[]>((items, page, index) => {
+    if (index > 0 && page - orderedPages[index - 1] > 1) items.push('ellipsis');
+    items.push(page);
+    return items;
+  }, []);
+};
 
 type MangaListItem = {
   id: number;
@@ -130,6 +149,13 @@ const MangaSearchPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [readingMangaID, setReadingMangaID] = useState<number | null>(null);
   const [error, setError] = useState<string>('');
+  const [browseResults, setBrowseResults] = useState<MangaDexBrowseItem[]>([]);
+  const [browsePage, setBrowsePage] = useState(1);
+  const [browseTotal, setBrowseTotal] = useState(0);
+  const [browseLimit, setBrowseLimit] = useState(MANGADEX_BROWSE_PAGE_SIZE);
+  const [browseCoverErrors, setBrowseCoverErrors] = useState<Set<string>>(new Set());
+  const [isBrowseLoading, setIsBrowseLoading] = useState(true);
+  const [browseError, setBrowseError] = useState('');
 
   const runSearch = useCallback(
     async (filters: AniListMangaSearchParams) => {
@@ -172,6 +198,27 @@ const MangaSearchPage: React.FC = () => {
       setError('');
     }
   }, [runSearch, searchParams]);
+
+  const loadBrowsePage = useCallback(async (page: number) => {
+    setIsBrowseLoading(true);
+    setBrowseError('');
+    try {
+      const response = await backend.getMangaDexBrowse(MANGADEX_BROWSE_PAGE_SIZE, (page - 1) * MANGADEX_BROWSE_PAGE_SIZE);
+      setBrowseResults(response.data);
+      setBrowseTotal(response.total);
+      setBrowseLimit(response.limit || MANGADEX_BROWSE_PAGE_SIZE);
+      setBrowseCoverErrors(new Set());
+    } catch (err) {
+      setBrowseResults([]);
+      setBrowseError((err as Error).message || 'Failed to browse MangaDex manga.');
+    } finally {
+      setIsBrowseLoading(false);
+    }
+  }, [backend]);
+
+  useEffect(() => {
+    void loadBrowsePage(browsePage);
+  }, [browsePage, loadBrowsePage]);
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -223,6 +270,9 @@ const MangaSearchPage: React.FC = () => {
       setReadingMangaID(null);
     }
   };
+
+  const browsePageCount = Math.max(1, Math.ceil(browseTotal / browseLimit));
+  const browsePageItems = getBrowsePageItems(browsePage, browsePageCount);
 
   return (
     <div className="p-3">
@@ -352,6 +402,79 @@ const MangaSearchPage: React.FC = () => {
           </Col>
         ))}
       </Row>
+
+      <section className="mt-5" aria-labelledby="mangadex-browse-heading">
+        <h3 id="mangadex-browse-heading">Browse MangaDex A–Z</h3>
+        <p className="text-muted">Titles are ordered alphabetically by MangaDex.</p>
+
+        {isBrowseLoading && (
+          <div className="mb-3">
+            <Spinner animation="border" size="sm" className="me-2" />
+            Loading MangaDex titles...
+          </div>
+        )}
+        {browseError && <div className="text-danger mb-3">{browseError}</div>}
+        {!isBrowseLoading && !browseError && browseResults.length === 0 && (
+          <p className="text-muted">No MangaDex titles are available on this page.</p>
+        )}
+
+        <Row>
+          {browseResults.map((manga) => (
+            <Col key={manga.id} xs={12} md={6} lg={4} className="mb-3">
+              <Card className="flex-row h-100 overflow-hidden" style={{ cursor: 'pointer', minHeight: '180px' }} onClick={() => navigate(`/manga/${manga.id}`)}>
+                {manga.coverUrl && !browseCoverErrors.has(manga.id) ? (
+                  <Card.Img
+                    src={manga.coverUrl}
+                    alt={`Cover for ${manga.title}`}
+                    referrerPolicy="no-referrer"
+                    onError={() => setBrowseCoverErrors((previous) => new Set(previous).add(manga.id))}
+                    style={{ width: '120px', height: '180px', objectFit: 'cover', flexShrink: 0 }}
+                  />
+                ) : (
+                  <div className="d-flex align-items-center justify-content-center text-muted bg-light text-center" style={{ width: '120px', height: '180px', flexShrink: 0 }}>
+                    No cover available
+                  </div>
+                )}
+                <Card.Body className="d-flex flex-column overflow-hidden">
+                  <Card.Title style={{ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' }}>
+                    {manga.title}
+                  </Card.Title>
+                  <Card.Text className="mb-0" style={{ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 5, overflow: 'hidden' }}>
+                    {manga.description || 'No description available.'}
+                  </Card.Text>
+                </Card.Body>
+              </Card>
+            </Col>
+          ))}
+        </Row>
+
+        {!isBrowseLoading && !browseError && browseTotal > 0 && (
+          <nav className="d-flex flex-wrap align-items-center justify-content-center gap-2 mt-2" aria-label="MangaDex browse pagination">
+            <Button type="button" variant="outline-secondary" onClick={() => setBrowsePage((page) => page - 1)} disabled={browsePage === 1}>
+              Previous page
+            </Button>
+            {browsePageItems.map((item, index) => item === 'ellipsis' ? (
+              <span key={`ellipsis-${index}`} className="px-1" aria-hidden="true">…</span>
+            ) : (
+              <Button
+                key={item}
+                type="button"
+                variant={item === browsePage ? 'primary' : 'outline-secondary'}
+                onClick={() => setBrowsePage(item)}
+                disabled={item === browsePage}
+                aria-current={item === browsePage ? 'page' : undefined}
+                aria-label={`Page ${item}`}
+              >
+                {item}
+              </Button>
+            ))}
+            <Button type="button" variant="outline-secondary" onClick={() => setBrowsePage((page) => page + 1)} disabled={browsePage >= browsePageCount}>
+              Next page
+            </Button>
+            <span className="visually-hidden" aria-live="polite">Page {browsePage} of {browsePageCount}</span>
+          </nav>
+        )}
+      </section>
 
     </div>
   );

@@ -36,7 +36,13 @@ func ChatController(router *gin.Engine) {
 		routes.GET("/rooms", listChatRooms)
 		routes.POST("/rooms", createChatRoom)
 		routes.POST("/rooms/:roomID/join", joinPublicChatRoom)
+		routes.GET("/rooms/:roomID/members", listChatRoomMembers)
+		routes.GET("/rooms/:roomID/member-directory", listChatRoomMemberDirectory)
+		routes.POST("/rooms/:roomID/moderators/:userID", addChatRoomModerator)
+		routes.DELETE("/rooms/:roomID/moderators/:userID", removeChatRoomModerator)
+		routes.POST("/rooms/:roomID/bans/:userID", banChatRoomMember)
 		routes.PATCH("/rooms/:roomID/visibility", updateChatRoomVisibility)
+		routes.PATCH("/rooms/:roomID/notifications", updateChatRoomNotifications)
 		routes.PATCH("/rooms/:roomID/theme", updateChatRoomTheme)
 		routes.POST("/rooms/:roomID/theme-image", uploadChatRoomThemeImage)
 		routes.DELETE("/rooms/:roomID/theme-image", removeChatRoomThemeImage)
@@ -68,6 +74,10 @@ type reportChatMessageRequest struct {
 
 type updateChatRoomVisibilityRequest struct {
 	Visibility string `json:"visibility"`
+}
+
+type updateChatRoomNotificationsRequest struct {
+	Muted bool `json:"muted"`
 }
 
 type updateChatRoomThemeRequest struct {
@@ -129,6 +139,10 @@ func joinPublicChatRoom(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Invitation required", "message": "This room can only be joined through an invite link."})
 		return
 	}
+	if errors.Is(err, database.ErrChatRoomBanned) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Chat room ban", "message": "You are permanently banned from this chatroom."})
+		return
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to join chat room"})
 		return
@@ -160,6 +174,35 @@ func updateChatRoomVisibility(c *gin.Context) {
 		return
 	} else if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to update room access"})
+		return
+	}
+	room, err := database.GetChatRoomForMember(roomID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to load updated chat room"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"result": "ok", "room": room})
+}
+
+func updateChatRoomNotifications(c *gin.Context) {
+	userID, ok := chatUserID(c)
+	if !ok {
+		return
+	}
+	roomID, valid := chatRoomID(c)
+	if !valid {
+		return
+	}
+	var request updateChatRoomNotificationsRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid notification setting"})
+		return
+	}
+	if err := database.SetChatRoomMuted(roomID, userID, request.Muted); errors.Is(err, database.ErrChatRoomAccess) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Chat room access denied"})
+		return
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to update chat room notifications"})
 		return
 	}
 	room, err := database.GetChatRoomForMember(roomID, userID)
@@ -207,6 +250,128 @@ func updateChatRoomTheme(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"result": "ok", "room": room})
+}
+
+func listChatRoomMembers(c *gin.Context) {
+	userID, ok := chatUserID(c)
+	if !ok {
+		return
+	}
+	roomID, valid := chatRoomID(c)
+	if !valid {
+		return
+	}
+	members, err := database.ListChatRoomMembersForOwner(roomID, userID)
+	if errors.Is(err, database.ErrChatRoomAccess) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Only the room owner can manage moderators"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to load chat room members"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"result": "ok", "data": members})
+}
+
+func listChatRoomMemberDirectory(c *gin.Context) {
+	userID, ok := chatUserID(c)
+	if !ok {
+		return
+	}
+	roomID, valid := chatRoomID(c)
+	if !valid {
+		return
+	}
+	members, err := database.ListChatRoomMemberDirectory(roomID, userID)
+	if errors.Is(err, database.ErrChatRoomAccess) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You must be a chat room member to view its members"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to load chat room members"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"result": "ok", "data": members})
+}
+
+func addChatRoomModerator(c *gin.Context) {
+	updateChatRoomModerator(c, true)
+}
+
+func removeChatRoomModerator(c *gin.Context) {
+	updateChatRoomModerator(c, false)
+}
+
+func updateChatRoomModerator(c *gin.Context, add bool) {
+	ownerUserID, ok := chatUserID(c)
+	if !ok {
+		return
+	}
+	roomID, valid := chatRoomID(c)
+	if !valid {
+		return
+	}
+	targetUserID, valid := chatTargetUserID(c)
+	if !valid {
+		return
+	}
+	var err error
+	if add {
+		err = database.AddChatRoomModerator(roomID, ownerUserID, targetUserID)
+	} else {
+		err = database.RemoveChatRoomModerator(roomID, ownerUserID, targetUserID)
+	}
+	if errors.Is(err, database.ErrChatRoomAccess) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Only the room owner can manage moderators"})
+		return
+	}
+	if errors.Is(err, database.ErrChatRoomMemberNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Chat room member not found"})
+		return
+	}
+	if errors.Is(err, database.ErrChatRoomModerationDenied) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "The room owner is always in charge"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to update moderator"})
+		return
+	}
+	members, err := database.ListChatRoomMembersForOwner(roomID, ownerUserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Moderator updated but members could not be refreshed"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"result": "ok", "data": members})
+}
+
+func banChatRoomMember(c *gin.Context) {
+	actingUserID, ok := chatUserID(c)
+	if !ok {
+		return
+	}
+	roomID, valid := chatRoomID(c)
+	if !valid {
+		return
+	}
+	targetUserID, valid := chatTargetUserID(c)
+	if !valid {
+		return
+	}
+	if err := database.BanChatRoomMember(roomID, actingUserID, targetUserID); errors.Is(err, database.ErrChatRoomAccess) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Moderator permission required"})
+		return
+	} else if errors.Is(err, database.ErrChatRoomMemberNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Chat room member not found"})
+		return
+	} else if errors.Is(err, database.ErrChatRoomModerationDenied) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "This member cannot be banned"})
+		return
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to ban chat room member"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"result": "ok", "message": "Member permanently banned"})
 }
 
 func getChatRoom(c *gin.Context) {
@@ -307,7 +472,7 @@ func deleteChatMessage(c *gin.Context) {
 	}
 	imagePath, err := database.DeleteChatMessage(roomID, userID, messageID)
 	if errors.Is(err, database.ErrChatRoomAccess) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Message deletion denied", "message": "You can only delete your own messages in this chatroom."})
+		c.JSON(http.StatusForbidden, gin.H{"error": "Message deletion denied"})
 		return
 	}
 	if err != nil {
@@ -381,7 +546,7 @@ func uploadChatRoomImage(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Only the room owner can change the room image"})
 		return
 	}
-	contents, extension, err := chatImageContents(c, "image", false)
+	contents, extension, err := chatImageContents(c, "image", false, maxChatImageBytes)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid room image", "message": err.Error()})
 		return
@@ -433,7 +598,7 @@ func uploadChatRoomThemeImage(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Only the room owner can change the theme image"})
 		return
 	}
-	contents, extension, err := chatImageContents(c, "image", true)
+	contents, extension, err := chatImageContents(c, "image", true, maxThemeImageBytes)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid theme image", "message": err.Error()})
 		return
@@ -508,7 +673,7 @@ func postChatImageMessage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid message", "message": "Messages must be 2,000 characters or shorter."})
 		return
 	}
-	contents, extension, err := chatImageContents(c, "image", false)
+	contents, extension, err := chatImageContents(c, "image", false, maxChatImageBytes)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid message image", "message": err.Error()})
 		return
@@ -582,6 +747,10 @@ func joinChatRoomInvite(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Invitation not found", "message": "This invite link is invalid."})
 		return
 	}
+	if errors.Is(err, database.ErrChatRoomBanned) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Chat room ban", "message": "You are permanently banned from this chatroom."})
+		return
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to join chat room"})
 		return
@@ -626,6 +795,15 @@ func chatRoomID(c *gin.Context) (int64, bool) {
 		return 0, false
 	}
 	return roomID, true
+}
+
+func chatTargetUserID(c *gin.Context) (int, bool) {
+	userID, err := strconv.Atoi(c.Param("userID"))
+	if err != nil || userID < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user"})
+		return 0, false
+	}
+	return userID, true
 }
 
 func chatMessageLimit(c *gin.Context) (int, bool) {
@@ -681,28 +859,32 @@ func normalizeChatVisibility(visibility string) (string, bool) {
 	return visibility, true
 }
 
-func chatImageContents(c *gin.Context, field string, allowGIF bool) ([]byte, string, error) {
+func chatImageContents(c *gin.Context, field string, allowGIF bool, maxBytes int64) ([]byte, string, error) {
 	fileHeader, err := c.FormFile(field)
 	if err != nil {
 		return nil, "", chatImageFormatError(allowGIF, "choose a")
 	}
-	if fileHeader.Size <= 0 || fileHeader.Size > maxChatImageBytes {
-		return nil, "", fmt.Errorf("images must be 5 MB or smaller")
+	if fileHeader.Size <= 0 || fileHeader.Size > maxBytes {
+		return nil, "", imageSizeLimitError(maxBytes)
 	}
 	file, err := fileHeader.Open()
 	if err != nil {
 		return nil, "", fmt.Errorf("unable to read the selected image")
 	}
 	defer file.Close()
-	contents, err := io.ReadAll(io.LimitReader(file, maxChatImageBytes+1))
-	if err != nil || int64(len(contents)) > maxChatImageBytes {
-		return nil, "", fmt.Errorf("images must be 5 MB or smaller")
+	contents, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil || int64(len(contents)) > maxBytes {
+		return nil, "", imageSizeLimitError(maxBytes)
 	}
 	extension := chatImageExtension(contents, allowGIF)
 	if extension == "" {
 		return nil, "", chatImageFormatError(allowGIF, "use a")
 	}
 	return contents, extension, nil
+}
+
+func imageSizeLimitError(maxBytes int64) error {
+	return fmt.Errorf("images must be %d MB or smaller", maxBytes/(1024*1024))
 }
 
 func chatImageExtension(contents []byte, allowGIF bool) string {

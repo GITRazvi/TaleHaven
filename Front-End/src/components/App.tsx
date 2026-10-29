@@ -10,6 +10,7 @@ import HomePage from './home/home-page';
 import LoginPage from './auth/login-page';
 import RegisterPage from './auth/register-page';
 import ProfilePage from './auth/profile-page';
+import PublicProfilePage from './auth/public-profile-page';
 import ProtectedRoute from './auth/ProtectedRoute';
 import AdminRoute from './auth/AdminRoute';
 import LibraryPage from './library/library-page';
@@ -54,6 +55,12 @@ const AppContent: React.FC = () => {
     const siteThemeStyle = presentationThemeStyle(siteCustomColor, currentSiteThemeImageUrl);
     const siteThemePageColor = siteThemeStyle?.['--theme-page'];
     const usesScopedTheme = location.pathname === '/library' || location.pathname.startsWith('/chat/rooms/');
+    const isReaderPage = /^\/manga\/[^/]+\/chapter\/[^/]+/.test(location.pathname);
+
+    useEffect(() => {
+        document.body.classList.toggle('reader-page-active', isReaderPage);
+        return () => document.body.classList.remove('reader-page-active');
+    }, [isReaderPage]);
 
     useEffect(() => {
         if (!siteThemeImageCount) {
@@ -130,7 +137,7 @@ const AppContent: React.FC = () => {
                 siteThemeStyle={siteThemeStyle}
                 hasSiteThemeImage={Boolean(currentSiteThemeImageUrl)}
             />
-            <div className={`site-theme-app site-theme-${siteTheme}${currentSiteThemeImageUrl ? ' theme-has-image' : ''}`} style={siteThemeStyle}>
+            <div className={`site-theme-app site-theme-${siteTheme}${currentSiteThemeImageUrl ? ' theme-has-image' : ''}${isReaderPage ? ' manga-reader-route' : ''}`} style={siteThemeStyle}>
                 <Routes>
                     <Route path="/" element={<HomePage />} />
                     <Route path="/login" element={<LoginPage />} />
@@ -138,6 +145,11 @@ const AppContent: React.FC = () => {
                     <Route path="/profile" element={
                         <ProtectedRoute>
                             <ProfilePage />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/profile/:userID" element={
+                        <ProtectedRoute>
+                            <PublicProfilePage />
                         </ProtectedRoute>
                     } />
                     <Route path="/library" element={

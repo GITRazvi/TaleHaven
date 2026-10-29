@@ -19,6 +19,7 @@ func MangaDexController(router *gin.Engine) {
 	{
 		mangaRoutes.GET("/search", searchManga)                          // GET /manga/search?title=naruto&limit=10&offset=0
 		mangaRoutes.GET("/popular", getPopularManga)                     // GET /manga/popular?limit=20&offset=0&orderBy=followedCount
+		mangaRoutes.GET("/browse", browseMangaAlphabetically)            // GET /manga/browse?limit=24&offset=0
 		mangaRoutes.GET("/library", getDownloadedMangaLibrary)           // GET /manga/library - Get all downloaded manga with covers
 		mangaRoutes.GET("/:mangaId", getMangaByID)                       // GET /manga/{mangaId}
 		mangaRoutes.GET("/:mangaId/chapters", getChapters)               // GET /manga/{mangaId}/chapters
@@ -94,6 +95,44 @@ func getChapterPage(c *gin.Context) {
 		"pageNumber": result.PageNumber,
 		"totalPages": result.TotalPages,
 		"pageUrl":    result.PublicURL,
+	})
+}
+
+// browseMangaAlphabetically returns a paged MangaDex catalog listing ordered
+// by title, allowing the UI to browse independently of AniList metadata search.
+func browseMangaAlphabetically(c *gin.Context) {
+	limit := parseIntQuery(c, "limit", 24)
+	offset := parseIntQuery(c, "offset", 0)
+	if limit < 1 || limit > 100 || offset < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be 1-100 and offset must be non-negative"})
+		return
+	}
+
+	response, err := mangadex_api.GetMangaAlphabetically(limit, offset)
+	if err != nil {
+		utils.Logger.Error("Failed to browse MangaDex manga alphabetically", zap.Error(err))
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error":   "Failed to retrieve MangaDex browse results",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	simplifiedManga := make([]mangadex_api.SimpleManga, 0, len(response.Data))
+	for _, manga := range response.Data {
+		simplified := mangadex_api.TransformToSimpleManga(manga)
+		if coverURL := mangadex_api.BuildFullCoverURL(manga.ID, manga.Relationships, "512"); coverURL != "" {
+			simplified.CoverUrl = coverURL
+		}
+		simplifiedManga = append(simplifiedManga, simplified)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"result": "ok",
+		"data":   simplifiedManga,
+		"total":  response.Total,
+		"limit":  response.Limit,
+		"offset": response.Offset,
 	})
 }
 

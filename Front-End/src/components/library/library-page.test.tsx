@@ -26,13 +26,22 @@ it('groups saved AniList titles in My Profile and updates their book-level statu
   const getAniListCharacterFavorites = jest.fn().mockResolvedValue({ data: [{ characterId: 10, mangaId: 1, role: 'MAIN', name: { full: 'Main Hero', native: '', userPreferred: '' }, image: { large: 'https://example.test/main-hero.jpg', medium: '' } }] });
   const removeAniListCharacterFromFavorites = jest.fn().mockResolvedValue({ removed: true });
   const getAniListCharacterDetails = jest.fn().mockResolvedValue({ data: { id: 10, name: { full: 'Main Hero', native: '', userPreferred: '' }, image: { large: 'https://example.test/main-hero.jpg', medium: '' }, description: 'A heroic lead.', gender: '', dateOfBirth: { year: 0, month: 0, day: 0 }, age: '', bloodType: '', siteUrl: '', favourites: 0, media: { pageInfo: { currentPage: 1, hasNextPage: false, perPage: 25, total: 1 }, edges: [{ characterRole: 'MAIN', node: { id: 1, type: 'MANGA', title: { english: 'Saved Title', native: '', romaji: '', userPreferred: '' }, coverImage: { large: '', medium: '', color: '' }, format: 'MANGA', status: '', siteUrl: '' } }] } } });
+	const getProfileCommentsEnabled = jest.fn().mockResolvedValue({ enabled: true });
+	const getProfileComments = jest.fn().mockResolvedValue({ data: [{ id: 30, profileUserId: 1, userId: 2, authorDisplayName: 'Another Reader', profileImagePath: '', body: 'Welcome to TaleHaven!', createdAt: '2026-10-28T00:00:00Z' }] });
+	const createProfileComment = jest.fn().mockResolvedValue({ comment: { id: 31, profileUserId: 1, userId: 1, authorDisplayName: 'Reader', profileImagePath: '', body: 'My profile note', createdAt: '2026-10-28T00:00:00Z' } });
 	mockedUseAuth.mockReturnValue({ user: { id: 1, email: 'reader@example.test', role: 'user', displayName: 'Reader', profileImagePath: '', created_at: '2026-10-22T00:00:00Z' } } as ReturnType<typeof useAuth>);
-  mockedBackend.mockImplementation(() => ({ getAniListMyLibrary, removeAniListMangaFromMyLibrary, getAniListFavoriteIDs, addAniListMangaToFavorites, removeAniListMangaFromFavorites, getMangaDexFavorites, removeMangaFromFavorites, getAniListCharacterFavorites, removeAniListCharacterFromFavorites, getAniListCharacterDetails }));
+  mockedBackend.mockImplementation(() => ({ getAniListMyLibrary, removeAniListMangaFromMyLibrary, getAniListFavoriteIDs, addAniListMangaToFavorites, removeAniListMangaFromFavorites, getMangaDexFavorites, removeMangaFromFavorites, getAniListCharacterFavorites, removeAniListCharacterFromFavorites, getAniListCharacterDetails, getProfileCommentsEnabled, getProfileComments, createProfileComment }));
 
   render(<LibraryPage />, { wrapper: MemoryRouter });
 
 	expect(await screen.findByRole('heading', { name: 'Reader' })).toBeInTheDocument();
 	expect(screen.getByText('My Profile')).toBeInTheDocument();
+	expect(await screen.findByRole('heading', { name: 'Comments' })).toBeInTheDocument();
+	expect(await screen.findByText('Welcome to TaleHaven!')).toBeInTheDocument();
+	expect(screen.getByRole('link', { name: "View Another Reader's profile" })).toHaveAttribute('href', '/profile/2');
+	await userEvent.type(screen.getByRole('textbox', { name: 'Leave a comment' }), 'My profile note');
+	await userEvent.keyboard('{Enter}');
+	await waitFor(() => expect(createProfileComment).toHaveBeenCalledWith(1, 'My profile note'));
 	expect(await screen.findByRole('heading', { name: 'Currently Reading' })).toBeInTheDocument();
   expect((await screen.findAllByText('Saved Title')).length).toBeGreaterThan(0);
   expect(screen.getByText('2')).toBeInTheDocument();
@@ -83,8 +92,9 @@ it('keeps a user-scoped cached profile visible when AniList is temporarily unava
   const getAniListFavoriteIDs = jest.fn().mockResolvedValue({ data: [] });
   const getMangaDexFavorites = jest.fn().mockResolvedValue({ manga: [] });
   const getAniListCharacterFavorites = jest.fn().mockResolvedValue({ data: [] });
+	const getProfileCommentsEnabled = jest.fn().mockResolvedValue({ enabled: false });
   mockedUseAuth.mockReturnValue({ user: { id: 1, email: 'reader@example.test', created_at: '2026-10-24T00:00:00Z' } } as ReturnType<typeof useAuth>);
-  mockedBackend.mockImplementation(() => ({ getAniListMyLibrary, getAniListFavoriteIDs, getMangaDexFavorites, getAniListCharacterFavorites }));
+  mockedBackend.mockImplementation(() => ({ getAniListMyLibrary, getAniListFavoriteIDs, getMangaDexFavorites, getAniListCharacterFavorites, getProfileCommentsEnabled }));
 
   render(<LibraryPage />, { wrapper: MemoryRouter });
 

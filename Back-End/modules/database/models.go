@@ -90,6 +90,12 @@ var (
 	ErrChatMessageReportDenied    = errors.New("chat message report denied")
 	ErrChatMessageAlreadyReported = errors.New("chat message already reported")
 	ErrChatMessageReplyTarget     = errors.New("chat message reply target is invalid")
+	ErrAniListMangaCommentDenied  = errors.New("AniList manga comment action denied")
+	ErrChatRoomBanned             = errors.New("chat room member is banned")
+	ErrChatRoomMemberNotFound     = errors.New("chat room member not found")
+	ErrChatRoomModerationDenied   = errors.New("chat room moderation action denied")
+	ErrProfileCommentsDisabled    = errors.New("profile comments are disabled")
+	ErrProfileCommentDenied       = errors.New("profile comment action denied")
 )
 
 // User represents a user in the system
@@ -137,7 +143,26 @@ type ChatRoomSummary struct {
 	MemberCount      int    `json:"memberCount"`
 	IsMember         bool   `json:"isMember"`
 	IsOwner          bool   `json:"isOwner"`
+	IsModerator      bool   `json:"isModerator"`
+	IsMuted          bool   `json:"isMuted"`
 	CreatedAt        string `json:"createdAt"`
+}
+
+// ChatRoomMember is the safe identity data an owner needs to manage room
+// moderators. It intentionally excludes emails, account roles, and sessions.
+type ChatRoomMember struct {
+	UserID           int    `json:"userId"`
+	DisplayName      string `json:"displayName"`
+	ProfileImagePath string `json:"profileImagePath"`
+	IsOwner          bool   `json:"isOwner"`
+	IsModerator      bool   `json:"isModerator"`
+}
+
+// ChatRoomMemberDirectoryEntry is the minimal identity shown to other room
+// members. It omits avatar paths, moderation state, email, and account data.
+type ChatRoomMemberDirectoryEntry struct {
+	UserID      int    `json:"userId"`
+	DisplayName string `json:"displayName"`
 }
 
 // ChatMessage is a member-visible message. Email addresses and session data
@@ -152,6 +177,40 @@ type ChatMessage struct {
 	ImagePath         string `json:"imagePath"`
 	ReplyToMessageID  int64  `json:"replyToMessageId"`
 	CreatedAt         string `json:"createdAt"`
+}
+
+// AniListMangaComment is a public discussion entry. It deliberately contains
+// only the author's safe profile identity, never account or session fields.
+type AniListMangaComment struct {
+	ID                int64  `json:"id"`
+	AniListID         int    `json:"anilistId"`
+	UserID            int    `json:"userId"`
+	AuthorDisplayName string `json:"authorDisplayName"`
+	ProfileImagePath  string `json:"profileImagePath"`
+	Body              string `json:"body"`
+	CreatedAt         string `json:"createdAt"`
+}
+
+// ProfileComment is a public-profile discussion entry. It includes only the
+// author's safe display identity, never account or session information.
+type ProfileComment struct {
+	ID                int64  `json:"id"`
+	ProfileUserID     int    `json:"profileUserId"`
+	UserID            int    `json:"userId"`
+	AuthorDisplayName string `json:"authorDisplayName"`
+	ProfileImagePath  string `json:"profileImagePath"`
+	Body              string `json:"body"`
+	CreatedAt         string `json:"createdAt"`
+}
+
+type Notification struct {
+	ID         int64  `json:"id"`
+	Type       string `json:"type"`
+	Title      string `json:"title"`
+	Body       string `json:"body"`
+	TargetPath string `json:"targetPath"`
+	CreatedAt  string `json:"createdAt"`
+	Read       bool   `json:"read"`
 }
 
 // Manga represents manga metadata from MangaDex

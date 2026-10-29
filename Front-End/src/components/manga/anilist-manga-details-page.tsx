@@ -15,6 +15,7 @@ import Backend from "../../app/clients/backend/backend";
 import {
   AniListCharacterDetails,
   AniListLibraryItem,
+	AniListMangaComment,
   AniListManga,
   AniListReadingStatus,
 } from "../../app/clients/backend/types";
@@ -123,6 +124,12 @@ const externalReadingLinksOf = (manga: AniListManga) => {
   });
 };
 const RECOMMENDATION_COUNT = 6;
+const commentDateLabel = (value: string) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? ""
+    : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+};
 
 const AniListMangaDetailsPage: React.FC = () => {
   const { anilistId } = useParams();
@@ -163,6 +170,12 @@ const AniListMangaDetailsPage: React.FC = () => {
   const [chapterSourceID, setChapterSourceID] = useState<string | null>(null);
   const [chapterAvailabilityLoading, setChapterAvailabilityLoading] = useState(true);
   const [chapterAvailabilityError, setChapterAvailabilityError] = useState("");
+  const [comments, setComments] = useState<AniListMangaComment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsError, setCommentsError] = useState("");
+  const [commentBody, setCommentBody] = useState("");
+  const [commentSaving, setCommentSaving] = useState(false);
+  const [deletingCommentID, setDeletingCommentID] = useState<number | null>(null);
 
   useEffect(() => {
     const id = Number(anilistId);
@@ -297,6 +310,31 @@ const AniListMangaDetailsPage: React.FC = () => {
       isCurrent = false;
     };
   }, [backend, user]);
+
+  useEffect(() => {
+    const id = Number(anilistId);
+    if (!user || !Number.isInteger(id) || id < 1) {
+      setComments([]);
+      setCommentsError("");
+      setCommentsLoading(false);
+      return;
+    }
+    let isCurrent = true;
+    setCommentsLoading(true);
+    setCommentsError("");
+    void backend
+      .getAniListMangaComments(id)
+      .then((response) => {
+        if (isCurrent) setComments(response.data);
+      })
+      .catch((requestError) => {
+        if (isCurrent) setCommentsError((requestError as Error).message || "Unable to load comments.");
+      })
+      .finally(() => {
+        if (isCurrent) setCommentsLoading(false);
+      });
+    return () => { isCurrent = false; };
+  }, [anilistId, backend, user]);
 
   useEffect(() => {
     if (!user) {
@@ -447,6 +485,36 @@ const AniListMangaDetailsPage: React.FC = () => {
       );
     } finally {
       setRatingSaving(false);
+    }
+  };
+
+  const submitComment = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!manga || !commentBody.trim() || commentSaving) return;
+    setCommentSaving(true);
+    setCommentsError("");
+    try {
+      const response = await backend.createAniListMangaComment(manga.id, commentBody.trim());
+      setComments((current) => [response.comment, ...current]);
+      setCommentBody("");
+    } catch (requestError) {
+      setCommentsError((requestError as Error).message || "Unable to post your comment.");
+    } finally {
+      setCommentSaving(false);
+    }
+  };
+
+  const deleteComment = async (commentID: number) => {
+    if (!manga || deletingCommentID !== null) return;
+    setDeletingCommentID(commentID);
+    setCommentsError("");
+    try {
+      await backend.deleteAniListMangaComment(manga.id, commentID);
+      setComments((current) => current.filter((comment) => comment.id !== commentID));
+    } catch (requestError) {
+      setCommentsError((requestError as Error).message || "Unable to delete your comment.");
+    } finally {
+      setDeletingCommentID(null);
     }
   };
 
@@ -752,6 +820,75 @@ const AniListMangaDetailsPage: React.FC = () => {
           <p style={{ whiteSpace: "pre-line" }}>
             {manga.description || "No description is available."}
           </p>
+          <section className="manga-comments-section mt-4" aria-labelledby="manga-comments-heading">
+            <h2 id="manga-comments-heading" className="h3 mb-3">Comments</h2>
+            {!user ? (
+              <Alert variant="secondary" className="mb-0">
+                <Link to="/login">Sign in</Link> to read and join the discussion.
+              </Alert>
+            ) : (
+              <>
+                <Form onSubmit={submitComment} className="mb-3">
+                  <Form.Label htmlFor="manga-comment-body">Share your thoughts</Form.Label>
+                  <Form.Control
+                    as="textarea"
+                    id="manga-comment-body"
+                    rows={3}
+                    maxLength={1000}
+                    value={commentBody}
+                    onChange={(event) => setCommentBody(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey) {
+                        event.preventDefault();
+                        event.currentTarget.form?.requestSubmit();
+                      }
+                    }}
+                    placeholder="Write a comment…"
+                  />
+                  <div className="d-flex justify-content-between align-items-center gap-3 mt-2">
+                    <Form.Text>{commentBody.length}/1000</Form.Text>
+                    <Button type="submit" size="sm" disabled={commentSaving || !commentBody.trim()}>
+                      {commentSaving ? "Posting…" : "Post comment"}
+                    </Button>
+                  </div>
+                </Form>
+                {commentsError && <Alert variant="danger">{commentsError}</Alert>}
+                {commentsLoading ? (
+                  <div className="text-center py-3"><Spinner animation="border" size="sm" className="me-2" />Loading comments…</div>
+                ) : comments.length === 0 ? (
+                  <p className="text-muted mb-0">No comments yet. Start the discussion.</p>
+                ) : (
+                  <div className="d-grid gap-3">
+                    {comments.map((comment) => {
+                      const avatarURL = comment.profileImagePath ? `${backend.getBaseUrl()}${comment.profileImagePath}` : "";
+                      const initial = comment.authorDisplayName.trim().charAt(0).toUpperCase() || "R";
+                      return (
+                        <article key={comment.id} className="manga-comment">
+                          <div className="d-flex align-items-start gap-3">
+                            <Link to={`/profile/${comment.userId}`} className="manga-comment-avatar" aria-label={`View ${comment.authorDisplayName}'s profile`}>
+                              {avatarURL ? <img src={avatarURL} alt="" /> : <span aria-hidden="true">{initial}</span>}
+                            </Link>
+                            <div className="flex-grow-1 min-width-0">
+                              <div className="d-flex flex-wrap align-items-center gap-2">
+                                <Link to={`/profile/${comment.userId}`} className="manga-comment-author">{comment.authorDisplayName}</Link>
+                                {comment.createdAt && <time className="text-muted small" dateTime={comment.createdAt}>{commentDateLabel(comment.createdAt)}</time>}
+                                {comment.userId === user.id && (
+                                  <Button variant="link" size="sm" className="ms-auto p-0 text-danger" onClick={() => void deleteComment(comment.id)} disabled={deletingCommentID === comment.id}>
+                                    {deletingCommentID === comment.id ? "Deleting…" : "Delete"}
+                                  </Button>
+                                )}
+                              </div>
+                              <p className="mb-0 mt-1" style={{ whiteSpace: "pre-wrap" }}>{comment.body}</p>
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </section>
           {relatedManga.length > 0 && (
             <section className="mt-4" aria-labelledby="related-manga-heading">
               <h2 id="related-manga-heading" className="h3 mb-3">Related manga</h2>

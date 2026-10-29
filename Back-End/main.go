@@ -83,10 +83,12 @@ func addRoutes(router *gin.Engine) {
 	// Authentication endpoints
 	controllers.AuthController(router)
 	controllers.ProfileController(router)
+	controllers.NotificationsController(router)
 	controllers.AdminController(router)
 
 	controllers.MangaDexController(router)
 	controllers.AniListController(router)
+	controllers.AniListMangaCommentsController(router)
 	controllers.LibraryController(router)
 	controllers.FavoritesController(router)
 	controllers.ReadingProgressController(router)

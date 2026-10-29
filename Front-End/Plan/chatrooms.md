@@ -22,6 +22,9 @@ passwords.
   chatroom button, so browsing rooms remains the primary view.
 - Keep all per-room management controls inside a collapsed creator-only Room
   settings panel.
+- Let readers search the rooms they are permitted to see by name, including
+  public rooms and their own private rooms, without disclosing other private
+  room names.
 
 ## API and data changes
 
@@ -36,6 +39,17 @@ passwords.
    messages.
 3. Show owner-only invite-link controls and clear authorization/errors.
 4. Add focused tests and validate build/runtime behavior.
+
+### Safe room-name search extension
+
+1. Filter the already authorized room-list response by a case-insensitive room
+   name query.
+2. Apply the query to public rooms and private rooms the signed-in reader can
+   access; do not add a discovery path for private rooms outside that list.
+3. Keep the public and private sections visible with clear empty-search states
+   and cover filtering in the room-browser test.
+4. Keep the search field collapsed behind a Search button; closing it clears
+   the query so no hidden filter remains active.
 
 ### Visibility update extension
 
@@ -104,6 +118,30 @@ passwords.
 - Add live socket updates, typing state, pagination/history controls, message
   reports, and room moderation.
 
+### Room moderation extension
+
+1. Show the room creator a member-management panel inside Room settings to
+   assign/revoke moderator status using safe names and avatars.
+2. Mark the current reader's moderator status in room data so owners and
+   moderators can use delete/ban actions for other messages.
+3. Confirm permanent bans before sending them and remove the banned member
+   from the active conversation and owner member list after success.
+4. Cover owner-only moderator assignment plus the moderator action controls.
+
+### Member directory extension
+
+1. Add a Members button in an open chatroom for every current member.
+2. Open a compact read-only member modal containing names as public-profile
+   links; leave management actions inside creator-only Room settings.
+3. Add focused coverage for opening and rendering the directory.
+
+### Per-user room notification muting extension
+
+1. Surface the signed-in member's current mute state in room metadata.
+2. Add a header control to mute or unmute the current room without requiring
+   creator privileges.
+3. Keep the setting scoped to new-message notifications from that room only.
+
 ## Implementation status
 
 - Added protected room browser, room creation, invite redemption, conversation,
@@ -154,6 +192,11 @@ passwords.
   view; an unavailable source is clearly labelled.
 - Validation passed: focused chatroom coverage, all 52 frontend tests, and the
   production build.
+- Every room member can now open a compact Members dialog from the conversation
+  header. It contains only clickable member names; moderation controls remain
+  hidden in creator-only Room settings. Focused chatroom coverage and the full
+  frontend suite pass (17 suites, 67 tests); the rebuilt frontend is running
+  on port 3000.
 
 ### Chat author profile preview
 
@@ -170,3 +213,21 @@ passwords.
   its top edge; a letter avatar is used when no photo exists.
 - Validation passed: focused chatroom coverage, all 53 frontend tests, and the
   production build.
+- The room-name search is now collapsed behind a Search button beside Create
+  chatroom. Closing the panel clears its query while retaining the same safe
+  public/private filtering behavior.
+
+### Room moderation implementation status
+
+- Room settings now includes an owner-only member list with safe profile links
+  and Make/Remove moderator controls.
+- Owners and moderators receive delete and permanent-ban actions in another
+  member's message menu. Bans require explicit confirmation and remove that
+  member's messages from the active view after success.
+- Full frontend validation passes (17 suites, 67 tests), including moderator
+  action coverage. The rebuilt frontend container is running on port 3000.
+- Every current chatroom member can now mute or unmute that room from its
+  header. The preference is reader-specific and only stops future new-message
+  notifications from that room. Focused coverage was added; the full frontend
+  suite passes (17 suites, 68 tests) and the rebuilt frontend is running on
+  port 3000.

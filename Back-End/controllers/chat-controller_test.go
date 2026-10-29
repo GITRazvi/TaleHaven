@@ -1,6 +1,12 @@
 package controllers
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+)
 
 func TestNormalizeChatRoom(t *testing.T) {
 	name, visibility, valid := normalizeChatRoom("  Tavern  ", "INVITE_ONLY")
@@ -45,5 +51,29 @@ func TestChatThemeBackgroundAllowsGIFWithoutExtendingOtherImageUploads(t *testin
 	}
 	if extension := chatImageExtension(gifContents, false); extension != "" {
 		t.Fatalf("GIF should remain unavailable for non-theme uploads, got %q", extension)
+	}
+}
+
+func TestThemeImageLimitIsFifteenMegabytes(t *testing.T) {
+	if maxThemeImageBytes != 15*1024*1024 {
+		t.Fatalf("theme image limit = %d, want 15 MB", maxThemeImageBytes)
+	}
+	if maxProfilePhotoBytes != 5*1024*1024 || maxChatImageBytes != 5*1024*1024 {
+		t.Fatal("non-theme image limits must remain 5 MB")
+	}
+	if message := imageSizeLimitError(maxThemeImageBytes).Error(); message != "images must be 15 MB or smaller" {
+		t.Fatalf("theme size message = %q", message)
+	}
+}
+
+func TestChatModerationRoutesRequireAuthentication(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	ChatController(router)
+	request := httptest.NewRequest(http.MethodGet, "/chat/rooms/1/members", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
 	}
 }

@@ -88,6 +88,35 @@ invite link.
 - Add message reports, moderation/audit actions, room ownership transfer,
   deletion, rate limits, and WebSocket delivery.
 
+### Room moderation extension
+
+1. Add room-moderator and permanent room-ban tables, including member removal
+   when a ban is issued.
+2. Let only the room owner assign or revoke moderators; expose safe member
+   identity and moderator state only to that owner for management.
+3. Allow owners and moderators to delete room messages. Allow moderators to
+   ban ordinary members, while the owner cannot be banned and moderator status
+   does not grant control over other moderators.
+4. Reject banned readers from public joins, invite joins, room access, and
+   subsequent posts. Add focused authorization and ban-state coverage.
+
+### Member directory extension
+
+1. Let every current room member read a minimal member directory containing
+   only display name and public-profile ID, without exposing avatars,
+   moderation state, emails, or other account data.
+2. Keep moderator assignment/revocation restricted to the room owner and ban
+   powers restricted to the existing owner/moderator policy.
+3. Verify non-members cannot retrieve the directory.
+
+### Per-user room notification muting extension
+
+1. Store a reader-owned mute preference per chatroom without changing the
+   room's visibility or other members' notification settings.
+2. Let any current member toggle mute from the conversation header.
+3. Suppress only future ordinary chat-message notifications for that reader;
+   keep important direct room notices such as bans and moderator changes.
+
 ## Implementation status
 
 - Added public and invite-only rooms, membership records, SHA-256 hashed invite
@@ -151,3 +180,29 @@ invite link.
   duplicate reports and self-reports are rejected.
 - Validation passed: database tests (including reporting), focused chat
   controller tests, and the backend rebuild/restart check.
+
+### Room moderation implementation status
+
+- Added room-moderator and permanent-ban tables. A ban removes membership and
+  moderator status immediately, and both public joins and invite redemption
+  reject banned readers.
+- Only the room owner can list members or assign/revoke moderators. Owners can
+  moderate every other member; moderators can delete or ban only ordinary
+  members, never the room owner or another moderator.
+- Message deletion now enforces self, owner, or appropriately scoped moderator
+  authorization in the database query. Controller tests pass, and the rebuilt
+  backend applied `chat_room_moderation` and started on port 3001.
+- The required standalone database test was invoked before restart but is
+  blocked by this Windows host's forwarded PostgreSQL port 5433 restriction;
+  the containerized backend connected and ran the migration successfully.
+- Added a member-only `GET /chat/rooms/:roomID/member-directory` route that
+  returns only display names and public-profile IDs. The existing detailed
+  member endpoint remains owner-only for moderator management. Controller
+  coverage passes; the rebuilt backend connected to PostgreSQL and is running
+  on port 3001. The latest standalone database test is subject to the host
+  PostgreSQL-port limitation noted above.
+- Added member-owned room mute preferences and a protected `PATCH
+  /chat/rooms/:roomID/notifications` route. Muted members are excluded only
+  from future `chat_message` notifications; bans and moderator-role notices
+  remain direct notifications. Controller tests pass and the rebuilt backend
+  applied the new migration successfully.

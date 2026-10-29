@@ -10,7 +10,7 @@ import {
   Row,
   Spinner,
 } from "react-bootstrap";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { readBrowserCache, writeBrowserCache } from "../../app/browser-cache";
 import Backend from "../../app/clients/backend/backend";
 import {
@@ -20,6 +20,7 @@ import {
   AniListLibraryStats,
   AniListReadingStatus,
   MangaDexFavorite,
+  ProfileComment,
 } from "../../app/clients/backend/types";
 import { useAuth } from "../../contexts/AuthContext";
 import { presentationThemeStyle, themeBackgroundStyle, customThemeStyle } from "../../app/theme-style";
@@ -135,6 +136,13 @@ const LibraryPage: React.FC = () => {
   const [error, setError] = useState("");
   const [isUsingFallback, setIsUsingFallback] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [profileCommentsEnabled, setProfileCommentsEnabled] = useState<boolean | null>(null);
+  const [profileComments, setProfileComments] = useState<ProfileComment[]>([]);
+  const [profileCommentsLoading, setProfileCommentsLoading] = useState(false);
+  const [profileCommentsError, setProfileCommentsError] = useState("");
+  const [profileCommentBody, setProfileCommentBody] = useState("");
+  const [profileCommentSaving, setProfileCommentSaving] = useState(false);
+  const [deletingProfileCommentID, setDeletingProfileCommentID] = useState<number | null>(null);
   const cacheKey = user ? profileCacheKey(user.id) : null;
 
   const displayTheme = user?.displayTheme || "midnight";
@@ -258,6 +266,29 @@ const LibraryPage: React.FC = () => {
   useEffect(() => {
     void load(0, false);
   }, [load]);
+
+  useEffect(() => {
+    if (!user) return;
+    let isCurrent = true;
+    setProfileCommentsLoading(true);
+    setProfileCommentsError("");
+    void backend.getProfileCommentsEnabled()
+      .then(async (setting) => {
+        if (!isCurrent) return;
+        setProfileCommentsEnabled(setting.enabled);
+        if (!setting.enabled) {
+          setProfileComments([]);
+          return;
+        }
+        const response = await backend.getProfileComments(user.id);
+        if (isCurrent) setProfileComments(response.data);
+      })
+      .catch((err) => {
+        if (isCurrent) setProfileCommentsError((err as Error).message || "Unable to load profile comments.");
+      })
+      .finally(() => { if (isCurrent) setProfileCommentsLoading(false); });
+    return () => { isCurrent = false; };
+  }, [backend, user]);
 
   useEffect(() => {
     if (!selectedCharacterID) { setCharacterDetails(null); setCharacterDetailsError(""); return; }
@@ -389,6 +420,37 @@ const LibraryPage: React.FC = () => {
   );
   const showProfileContent = !error || isUsingFallback;
 
+  const submitProfileComment = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const body = profileCommentBody.trim();
+    if (!user || !body || profileCommentSaving) return;
+    setProfileCommentSaving(true);
+    setProfileCommentsError("");
+    try {
+      const response = await backend.createProfileComment(user.id, body);
+      setProfileComments((current) => [response.comment, ...current]);
+      setProfileCommentBody("");
+    } catch (err) {
+      setProfileCommentsError((err as Error).message || "Unable to post profile comment.");
+    } finally {
+      setProfileCommentSaving(false);
+    }
+  };
+
+  const deleteProfileComment = async (commentID: number) => {
+    if (!user || deletingProfileCommentID !== null) return;
+    setDeletingProfileCommentID(commentID);
+    setProfileCommentsError("");
+    try {
+      await backend.deleteProfileComment(user.id, commentID);
+      setProfileComments((current) => current.filter((comment) => comment.id !== commentID));
+    } catch (err) {
+      setProfileCommentsError((err as Error).message || "Unable to delete profile comment.");
+    } finally {
+      setDeletingProfileCommentID(null);
+    }
+  };
+
   return (
     <Container className={`py-5 profile-display-theme profile-theme-${displayTheme}${profileThemeImageUrl ? " theme-has-image" : ""}`} style={profileThemeStyle}>
       <Card className="mb-4 profile-identity-card shadow-sm">
@@ -495,6 +557,36 @@ const LibraryPage: React.FC = () => {
             </div>
           </Card.Body>
         </Card>
+      </section>
+
+      <section className="manga-comments-section mb-5" aria-labelledby="my-profile-comments-heading">
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+          <div>
+            <h2 id="my-profile-comments-heading" className="h3 mb-1">Comments</h2>
+            <p className="text-muted mb-0">Messages left on your profile.</p>
+          </div>
+          <Button variant="link" size="sm" onClick={() => navigate("/profile")}>Comment settings</Button>
+        </div>
+        {profileCommentsEnabled === false ? (
+          <Alert variant="secondary" className="mb-0">Comments are currently turned off on your profile.</Alert>
+        ) : (
+          <>
+            <Form onSubmit={submitProfileComment} className="mb-3">
+              <Form.Label htmlFor="my-profile-comment-body">Leave a comment</Form.Label>
+              <Form.Control as="textarea" id="my-profile-comment-body" rows={3} maxLength={1000} value={profileCommentBody} onChange={(event) => setProfileCommentBody(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="Write a comment…" />
+              <div className="d-flex justify-content-between align-items-center gap-3 mt-2">
+                <Form.Text>{profileCommentBody.length}/1000</Form.Text>
+                <Button type="submit" size="sm" disabled={profileCommentSaving || !profileCommentBody.trim()}>{profileCommentSaving ? "Posting…" : "Post comment"}</Button>
+              </div>
+            </Form>
+            {profileCommentsError && <Alert variant="danger">{profileCommentsError}</Alert>}
+            {profileCommentsLoading ? <div className="text-center py-3"><Spinner animation="border" size="sm" className="me-2" />Loading comments…</div> : profileComments.length === 0 ? <p className="text-muted mb-0">No comments yet.</p> : <div className="d-grid gap-3">{profileComments.map((comment) => {
+              const avatarURL = comment.profileImagePath ? `${backend.getBaseUrl()}${comment.profileImagePath}` : "";
+              const initial = comment.authorDisplayName.trim().charAt(0).toUpperCase() || "R";
+              return <article key={comment.id} className="manga-comment"><div className="d-flex align-items-start gap-3"><Link to={`/profile/${comment.userId}`} className="manga-comment-avatar" aria-label={`View ${comment.authorDisplayName}'s profile`}>{avatarURL ? <img src={avatarURL} alt="" /> : <span aria-hidden="true">{initial}</span>}</Link><div className="flex-grow-1 min-width-0"><div className="d-flex flex-wrap align-items-center gap-2"><Link to={`/profile/${comment.userId}`} className="manga-comment-author">{comment.authorDisplayName}</Link><Button variant="link" size="sm" className="ms-auto p-0 text-danger" onClick={() => void deleteProfileComment(comment.id)} disabled={deletingProfileCommentID === comment.id}>{deletingProfileCommentID === comment.id ? "Deleting…" : "Delete"}</Button></div><p className="mb-0 mt-1" style={{ whiteSpace: "pre-wrap" }}>{comment.body}</p></div></div></article>;
+            })}</div>}
+          </>
+        )}
       </section>
 
       {!loading && showProfileContent && currentlyReading.length > 0 && (

@@ -7,8 +7,8 @@ can discover AniList manga without writing free-form prompts.
 
 ## Scope
 
-- Offer fixed paths for genre, series type, publication status, and a surprise
-  recommendation.
+- Offer fixed paths for genres, most popular, new releases, top rated, and a
+  surprise recommendation.
 - Convert each choice into the existing public AniList manga-search request.
 - Show a small row of recommended covers and titles within the chat panel.
 - When signed in, exclude AniList titles already saved in the reader's library.
@@ -16,6 +16,11 @@ can discover AniList manga without writing free-form prompts.
   user text to a third party.
 - Accept a short typed request and recognize supported genre, format, and
   status keywords, plus “similar to <title>” and “same author as <title>”.
+- Let the guided genre buttons select multiple genres before recommendations
+  are requested, without requiring the reader to type a query.
+- Make **Surprise me** personalize its top-rated AniList search with one of
+  the reader's tied most-read genres from completed titles, while retaining a
+  general fallback for a new reader.
 
 ## API and data changes
 
@@ -37,6 +42,13 @@ can discover AniList manga without writing free-form prompts.
    remove the duplicated home-page placement.
 6. Parse typed requests into catalog filters; resolve the title in similar and
    same-author requests before issuing the final recommendation search.
+7. Make guided genre buttons toggleable and submit all selected genres as the
+   existing repeated AniList genre filter.
+8. Reuse the authenticated library response's `stats.topGenres` for the
+   surprise action; do not create a separate recommendation-profile endpoint.
+9. Replace the guided series-type and publication-status paths with direct
+   popularity, newest-release, and top-rated discovery choices while leaving
+   those filters available in typed requests.
 
 ## Validation
 
@@ -81,6 +93,14 @@ can discover AniList manga without writing free-form prompts.
   the resulting cards.
 - Added parser and component coverage for typed filter, similar-title, and
   same-author flows.
+- The guided genre route supports selecting multiple visible genre buttons and
+  submits their intersection only when the reader chooses to view results.
+- **Surprise me** now selects a top-rated manga from one of the signed-in
+  reader's tied most-read completed genres. Readers without completed history
+  receive a varied general-genre recommendation instead.
+- Guided buttons now provide **Most popular**, **New releases**, and **Top
+  rated** alongside genre selection. Their selected AniList sort order is
+  preserved rather than being overwritten by the top-rated default.
 
 ## Follow-up work
 

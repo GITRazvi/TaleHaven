@@ -26,7 +26,8 @@ owner-selected presentation themes for chatrooms.
   such as Home, manga search, and the chatroom browser.
 - Let a signed-in user upload several site-wide background images and select a
   static image, each-refresh image, per-browser-session image, or a
-  user-entered minute rotation for browsing pages.
+  user-entered minute rotation for browsing pages. Theme backgrounds may be
+  up to 15 MB each.
 - Keep the existing site dark/light toggle independent of these scoped themes.
 
 ## API changes
@@ -63,6 +64,8 @@ owner-selected presentation themes for chatrooms.
 14. Apply an active profile or open-chatroom background image to the shared
     viewport behind the app shell instead of repeating it inside only the
     centered content container.
+15. Keep profile, site, and chatroom theme-upload guidance aligned with the
+    server's 15 MB per-image limit.
 
 ## Follow-up work
 
@@ -121,3 +124,6 @@ owner-selected presentation themes for chatrooms.
   backdrop. The app shell and centered page container become transparent so
   the same artwork fills the outer side areas as well as the content region.
 - Validation passed: 51 frontend tests and the production build.
+- Profile, site, and chatroom theme-upload guidance now states the server's
+  15 MB per-image limit. The frontend suite passes (16 suites, 64 tests), and
+  the rebuilt frontend is running successfully.

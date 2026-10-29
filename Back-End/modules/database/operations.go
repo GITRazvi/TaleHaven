@@ -1037,6 +1037,8 @@ func CreateChatRoom(ownerUserID int, name, visibility string) (ChatRoomSummary, 
 	room.MemberCount = 1
 	room.IsMember = true
 	room.IsOwner = true
+	room.IsModerator = false
+	room.IsMuted = false
 	return room, nil
 }
 
@@ -1049,6 +1051,8 @@ func ListChatRoomsForUser(userID int) ([]ChatRoomSummary, error) {
 			COUNT(member.user_id),
 			EXISTS(SELECT 1 FROM chat_room_members mine WHERE mine.room_id = r.id AND mine.user_id = $1),
 			r.owner_user_id = $1,
+			EXISTS(SELECT 1 FROM chat_room_moderators moderator WHERE moderator.room_id = r.id AND moderator.user_id = $1),
+			EXISTS(SELECT 1 FROM chat_room_notification_preferences preference WHERE preference.room_id = r.id AND preference.user_id = $1),
 			TO_CHAR(r.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		FROM chat_rooms r
 		INNER JOIN users owner ON owner.id = r.owner_user_id
@@ -1066,7 +1070,7 @@ func ListChatRoomsForUser(userID int) ([]ChatRoomSummary, error) {
 	rooms := make([]ChatRoomSummary, 0)
 	for rows.Next() {
 		var room ChatRoomSummary
-		if err := rows.Scan(&room.ID, &room.Name, &room.Visibility, &room.ImagePath, &room.Theme, &room.CustomThemeColor, &room.ThemeImagePath, &room.OwnerUserID, &room.OwnerDisplayName, &room.MemberCount, &room.IsMember, &room.IsOwner, &room.CreatedAt); err != nil {
+		if err := rows.Scan(&room.ID, &room.Name, &room.Visibility, &room.ImagePath, &room.Theme, &room.CustomThemeColor, &room.ThemeImagePath, &room.OwnerUserID, &room.OwnerDisplayName, &room.MemberCount, &room.IsMember, &room.IsOwner, &room.IsModerator, &room.IsMuted, &room.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan chat room: %w", err)
 		}
 		rooms = append(rooms, room)
@@ -1085,12 +1089,14 @@ func GetChatRoomForMember(roomID int64, userID int) (ChatRoomSummary, error) {
 			COALESCE(NULLIF(owner.display_name, ''), split_part(owner.email, '@', 1)),
 			(SELECT COUNT(*) FROM chat_room_members member WHERE member.room_id = r.id),
 			true, r.owner_user_id = $2,
+			EXISTS(SELECT 1 FROM chat_room_moderators moderator WHERE moderator.room_id = r.id AND moderator.user_id = $2),
+			EXISTS(SELECT 1 FROM chat_room_notification_preferences preference WHERE preference.room_id = r.id AND preference.user_id = $2),
 			TO_CHAR(r.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		FROM chat_rooms r
 		INNER JOIN users owner ON owner.id = r.owner_user_id
 		INNER JOIN chat_room_members mine ON mine.room_id = r.id AND mine.user_id = $2
 		WHERE r.id = $1
-	`, roomID, userID).Scan(&room.ID, &room.Name, &room.Visibility, &room.ImagePath, &room.Theme, &room.CustomThemeColor, &room.ThemeImagePath, &room.OwnerUserID, &room.OwnerDisplayName, &room.MemberCount, &room.IsMember, &room.IsOwner, &room.CreatedAt)
+	`, roomID, userID).Scan(&room.ID, &room.Name, &room.Visibility, &room.ImagePath, &room.Theme, &room.CustomThemeColor, &room.ThemeImagePath, &room.OwnerUserID, &room.OwnerDisplayName, &room.MemberCount, &room.IsMember, &room.IsOwner, &room.IsModerator, &room.IsMuted, &room.CreatedAt)
 	if err == sql.ErrNoRows {
 		return ChatRoomSummary{}, ErrChatRoomAccess
 	}
@@ -1098,6 +1104,25 @@ func GetChatRoomForMember(roomID int64, userID int) (ChatRoomSummary, error) {
 		return ChatRoomSummary{}, fmt.Errorf("get chat room: %w", err)
 	}
 	return room, nil
+}
+
+// SetChatRoomMuted changes only one member's future message notifications.
+// A preference is meaningful only while the reader remains a room member.
+func SetChatRoomMuted(roomID int64, userID int, muted bool) error {
+	if _, err := GetChatRoomForMember(roomID, userID); err != nil {
+		return err
+	}
+	if muted {
+		_, err := DB.Exec(`INSERT INTO chat_room_notification_preferences (room_id, user_id) VALUES ($1, $2) ON CONFLICT (room_id, user_id) DO NOTHING`, roomID, userID)
+		if err != nil {
+			return fmt.Errorf("mute chat room notifications: %w", err)
+		}
+		return nil
+	}
+	if _, err := DB.Exec(`DELETE FROM chat_room_notification_preferences WHERE room_id = $1 AND user_id = $2`, roomID, userID); err != nil {
+		return fmt.Errorf("unmute chat room notifications: %w", err)
+	}
+	return nil
 }
 
 // JoinPublicChatRoom adds a user to a public room. Invite-only rooms cannot be
@@ -1112,6 +1137,11 @@ func JoinPublicChatRoom(roomID int64, userID int) (bool, error) {
 	}
 	if visibility != ChatRoomPublic {
 		return false, ErrChatInviteRequired
+	}
+	if banned, err := isChatRoomUserBanned(roomID, userID); err != nil {
+		return false, err
+	} else if banned {
+		return false, ErrChatRoomBanned
 	}
 	result, err := DB.Exec(`INSERT INTO chat_room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, roomID, userID)
 	if err != nil {
@@ -1209,6 +1239,215 @@ func UpdateChatRoomThemeImagePath(roomID int64, ownerUserID int, imagePath strin
 	return nil
 }
 
+// ListChatRoomMembersForOwner is retained for owner-only moderator management.
+func ListChatRoomMembersForOwner(roomID int64, ownerUserID int) ([]ChatRoomMember, error) {
+	if err := requireChatRoomOwner(roomID, ownerUserID); err != nil {
+		return nil, err
+	}
+	return listChatRoomMembers(roomID)
+}
+
+func listChatRoomMembers(roomID int64) ([]ChatRoomMember, error) {
+	rows, err := DB.Query(`
+		SELECT member.user_id,
+			COALESCE(NULLIF(u.display_name, ''), split_part(u.email, '@', 1)),
+			COALESCE(u.profile_image_path, ''),
+			room.owner_user_id = member.user_id,
+			EXISTS(SELECT 1 FROM chat_room_moderators moderator WHERE moderator.room_id = room.id AND moderator.user_id = member.user_id)
+		FROM chat_room_members member
+		INNER JOIN chat_rooms room ON room.id = member.room_id
+		INNER JOIN users u ON u.id = member.user_id
+		WHERE member.room_id = $1
+		ORDER BY room.owner_user_id = member.user_id DESC, u.display_name ASC, member.user_id ASC
+	`, roomID)
+	if err != nil {
+		return nil, fmt.Errorf("list chat room members: %w", err)
+	}
+	defer rows.Close()
+	members := make([]ChatRoomMember, 0)
+	for rows.Next() {
+		var member ChatRoomMember
+		if err := rows.Scan(&member.UserID, &member.DisplayName, &member.ProfileImagePath, &member.IsOwner, &member.IsModerator); err != nil {
+			return nil, fmt.Errorf("scan chat room member: %w", err)
+		}
+		members = append(members, member)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate chat room members: %w", err)
+	}
+	return members, nil
+}
+
+// ListChatRoomMemberDirectory lets a current room member see names they can
+// navigate to, without exposing owner-only moderation data.
+func ListChatRoomMemberDirectory(roomID int64, userID int) ([]ChatRoomMemberDirectoryEntry, error) {
+	if _, err := GetChatRoomForMember(roomID, userID); err != nil {
+		return nil, err
+	}
+	rows, err := DB.Query(`
+		SELECT member.user_id,
+			COALESCE(NULLIF(u.display_name, ''), split_part(u.email, '@', 1))
+		FROM chat_room_members member
+		INNER JOIN users u ON u.id = member.user_id
+		WHERE member.room_id = $1
+		ORDER BY LOWER(COALESCE(NULLIF(u.display_name, ''), split_part(u.email, '@', 1))), member.user_id ASC
+	`, roomID)
+	if err != nil {
+		return nil, fmt.Errorf("list chat room member directory: %w", err)
+	}
+	defer rows.Close()
+	members := make([]ChatRoomMemberDirectoryEntry, 0)
+	for rows.Next() {
+		var member ChatRoomMemberDirectoryEntry
+		if err := rows.Scan(&member.UserID, &member.DisplayName); err != nil {
+			return nil, fmt.Errorf("scan chat room member directory entry: %w", err)
+		}
+		members = append(members, member)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate chat room member directory: %w", err)
+	}
+	return members, nil
+}
+
+// AddChatRoomModerator grants a current non-owner member moderation powers.
+func AddChatRoomModerator(roomID int64, ownerUserID int, targetUserID int) error {
+	if err := requireChatRoomOwner(roomID, ownerUserID); err != nil {
+		return err
+	}
+	if err := requireChatRoomModeratableMember(roomID, ownerUserID, targetUserID); err != nil {
+		return err
+	}
+	_, err := DB.Exec(`
+		INSERT INTO chat_room_moderators (room_id, user_id, assigned_by_user_id)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (room_id, user_id) DO NOTHING
+	`, roomID, targetUserID, ownerUserID)
+	if err != nil {
+		return fmt.Errorf("add chat room moderator: %w", err)
+	}
+	_ = createRoomNotification(targetUserID, roomID, "room_moderator", "You are now a moderator", "You can moderate messages in this chatroom.")
+	return nil
+}
+
+// RemoveChatRoomModerator revokes a non-owner member's moderator role.
+func RemoveChatRoomModerator(roomID int64, ownerUserID int, targetUserID int) error {
+	if err := requireChatRoomOwner(roomID, ownerUserID); err != nil {
+		return err
+	}
+	if err := requireChatRoomModeratableMember(roomID, ownerUserID, targetUserID); err != nil {
+		return err
+	}
+	_, err := DB.Exec(`DELETE FROM chat_room_moderators WHERE room_id = $1 AND user_id = $2`, roomID, targetUserID)
+	if err != nil {
+		return fmt.Errorf("remove chat room moderator: %w", err)
+	}
+	_ = createRoomNotification(targetUserID, roomID, "room_moderator", "Moderator access removed", "Your moderator access was removed from this chatroom.")
+	return nil
+}
+
+// BanChatRoomMember permanently removes a reader from a room. Owners may ban
+// anyone else; moderators may ban only ordinary members, never owners or peers.
+func BanChatRoomMember(roomID int64, actingUserID int, targetUserID int) error {
+	var ownerUserID int
+	if err := DB.QueryRow(`SELECT owner_user_id FROM chat_rooms WHERE id = $1`, roomID).Scan(&ownerUserID); err != nil {
+		if err == sql.ErrNoRows {
+			return ErrChatRoomAccess
+		}
+		return fmt.Errorf("load chat room owner for ban: %w", err)
+	}
+	actingIsOwner := ownerUserID == actingUserID
+	actingIsModerator := false
+	if !actingIsOwner {
+		if err := DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM chat_room_moderators WHERE room_id = $1 AND user_id = $2)`, roomID, actingUserID).Scan(&actingIsModerator); err != nil {
+			return fmt.Errorf("load moderator status for ban: %w", err)
+		}
+		if !actingIsModerator {
+			return ErrChatRoomAccess
+		}
+	}
+	if targetUserID == ownerUserID || targetUserID == actingUserID {
+		return ErrChatRoomModerationDenied
+	}
+	var targetIsMember, targetIsModerator bool
+	if err := DB.QueryRow(`
+		SELECT EXISTS(SELECT 1 FROM chat_room_members WHERE room_id = $1 AND user_id = $2),
+			EXISTS(SELECT 1 FROM chat_room_moderators WHERE room_id = $1 AND user_id = $2)
+	`, roomID, targetUserID).Scan(&targetIsMember, &targetIsModerator); err != nil {
+		return fmt.Errorf("load chat room member for ban: %w", err)
+	}
+	if !targetIsMember {
+		return ErrChatRoomMemberNotFound
+	}
+	if !actingIsOwner && targetIsModerator {
+		return ErrChatRoomModerationDenied
+	}
+	tx, err := DB.Begin()
+	if err != nil {
+		return fmt.Errorf("begin chat room ban: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`
+		INSERT INTO chat_room_bans (room_id, user_id, banned_by_user_id)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (room_id, user_id) DO NOTHING
+	`, roomID, targetUserID, actingUserID); err != nil {
+		return fmt.Errorf("create chat room ban: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM chat_room_moderators WHERE room_id = $1 AND user_id = $2`, roomID, targetUserID); err != nil {
+		return fmt.Errorf("remove banned member moderator role: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM chat_room_members WHERE room_id = $1 AND user_id = $2`, roomID, targetUserID); err != nil {
+		return fmt.Errorf("remove banned chat room member: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit chat room ban: %w", err)
+	}
+	_ = createRoomNotification(targetUserID, roomID, "chat_ban", "You were banned from a chatroom", "You can no longer access this chatroom.")
+	return nil
+}
+
+func createRoomNotification(userID int, roomID int64, notificationType, title, body string) error {
+	var roomName string
+	if err := DB.QueryRow(`SELECT name FROM chat_rooms WHERE id = $1`, roomID).Scan(&roomName); err != nil {
+		return err
+	}
+	return CreateNotification(userID, notificationType, title, roomName+": "+body, fmt.Sprintf("/chat/rooms/%d", roomID))
+}
+
+func requireChatRoomOwner(roomID int64, userID int) error {
+	var isOwner bool
+	if err := DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM chat_rooms WHERE id = $1 AND owner_user_id = $2)`, roomID, userID).Scan(&isOwner); err != nil {
+		return fmt.Errorf("load chat room ownership: %w", err)
+	}
+	if !isOwner {
+		return ErrChatRoomAccess
+	}
+	return nil
+}
+
+func requireChatRoomModeratableMember(roomID int64, ownerUserID int, targetUserID int) error {
+	if targetUserID == ownerUserID {
+		return ErrChatRoomModerationDenied
+	}
+	var isMember bool
+	if err := DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM chat_room_members WHERE room_id = $1 AND user_id = $2)`, roomID, targetUserID).Scan(&isMember); err != nil {
+		return fmt.Errorf("load chat room member: %w", err)
+	}
+	if !isMember {
+		return ErrChatRoomMemberNotFound
+	}
+	return nil
+}
+
+func isChatRoomUserBanned(roomID int64, userID int) (bool, error) {
+	var banned bool
+	if err := DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM chat_room_bans WHERE room_id = $1 AND user_id = $2)`, roomID, userID).Scan(&banned); err != nil {
+		return false, fmt.Errorf("check chat room ban: %w", err)
+	}
+	return banned, nil
+}
+
 // CreateChatRoomInvite creates a reusable invite record for a room owner.
 // Only the SHA-256 hash of the browser-facing secret is stored.
 func CreateChatRoomInvite(roomID int64, ownerUserID int, tokenHash string) error {
@@ -1238,6 +1477,11 @@ func JoinChatRoomWithInvite(tokenHash string, userID int) (int64, bool, error) {
 			return 0, false, ErrChatInviteInvalid
 		}
 		return 0, false, fmt.Errorf("load chat invitation: %w", err)
+	}
+	if banned, err := isChatRoomUserBanned(roomID, userID); err != nil {
+		return 0, false, err
+	} else if banned {
+		return 0, false, ErrChatRoomBanned
 	}
 	result, err := DB.Exec(`INSERT INTO chat_room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, roomID, userID)
 	if err != nil {
@@ -1314,22 +1558,47 @@ func CreateChatMessage(roomID int64, userID int, body string, imagePath string, 
 	if err != nil {
 		return ChatMessage{}, fmt.Errorf("create chat message: %w", err)
 	}
+	var roomName string
+	if err := DB.QueryRow(`SELECT name FROM chat_rooms WHERE id = $1`, roomID).Scan(&roomName); err == nil {
+		preview := body
+		if preview == "" {
+			preview = "Shared an image"
+		}
+		_, _ = DB.Exec(`INSERT INTO user_notifications (user_id, type, title, body, target_path)
+			SELECT member.user_id, 'chat_message', $2, $3, $4
+			FROM chat_room_members member
+			WHERE member.room_id = $1 AND member.user_id <> $5
+				AND NOT EXISTS (
+					SELECT 1 FROM chat_room_notification_preferences preference
+					WHERE preference.room_id = member.room_id AND preference.user_id = member.user_id
+				)`,
+			roomID, "New message in "+roomName, preview, fmt.Sprintf("/chat/rooms/%d", roomID), userID)
+	}
 	return message, nil
 }
 
-// DeleteChatMessage removes a message only when the current room member wrote
-// it. The returned path lets the controller remove an attached server-owned
-// image after the database record has been deleted.
+// DeleteChatMessage permits self-deletion, owner deletion, and moderator
+// deletion of ordinary members' messages. Moderators cannot remove an owner's
+// or another moderator's message. The returned path lets the controller remove
+// any attached server-owned image after database deletion.
 func DeleteChatMessage(roomID int64, userID int, messageID int64) (string, error) {
 	var imagePath string
 	err := DB.QueryRow(`
-		DELETE FROM chat_messages
-		WHERE id = $1
-			AND room_id = $2
-			AND user_id = $3
+		DELETE FROM chat_messages AS message
+		WHERE message.id = $1
+			AND message.room_id = $2
 			AND EXISTS (
 				SELECT 1 FROM chat_room_members
 				WHERE room_id = $2 AND user_id = $3
+			)
+			AND (
+				message.user_id = $3
+				OR EXISTS (SELECT 1 FROM chat_rooms room WHERE room.id = $2 AND room.owner_user_id = $3)
+				OR (
+					EXISTS (SELECT 1 FROM chat_room_moderators moderator WHERE moderator.room_id = $2 AND moderator.user_id = $3)
+					AND NOT EXISTS (SELECT 1 FROM chat_rooms room WHERE room.id = $2 AND room.owner_user_id = message.user_id)
+					AND NOT EXISTS (SELECT 1 FROM chat_room_moderators target_moderator WHERE target_moderator.room_id = $2 AND target_moderator.user_id = message.user_id)
+				)
 			)
 		RETURNING COALESCE(image_path, '')
 	`, messageID, roomID, userID).Scan(&imagePath)
@@ -1373,6 +1642,241 @@ func ReportChatMessage(roomID, messageID int64, reporterUserID int, reason strin
 		return ErrChatMessageAlreadyReported
 	}
 	return ErrChatMessageReportDenied
+}
+
+// GetAniListMangaComments returns the latest discussion entries for one
+// AniList title. The joined user fields are purposefully limited to public
+// profile identity data.
+func GetAniListMangaComments(aniListID int, limit int) ([]AniListMangaComment, error) {
+	rows, err := DB.Query(`
+		SELECT c.id, c.anilist_id, c.user_id,
+			COALESCE(NULLIF(u.display_name, ''), split_part(u.email, '@', 1)),
+			COALESCE(u.profile_image_path, ''), c.body,
+			TO_CHAR(c.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		FROM anilist_manga_comments c
+		INNER JOIN users u ON u.id = c.user_id
+		WHERE c.anilist_id = $1
+		ORDER BY c.id DESC
+		LIMIT $2
+	`, aniListID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list AniList manga comments: %w", err)
+	}
+	defer rows.Close()
+
+	comments := make([]AniListMangaComment, 0)
+	for rows.Next() {
+		var comment AniListMangaComment
+		if err := rows.Scan(&comment.ID, &comment.AniListID, &comment.UserID, &comment.AuthorDisplayName, &comment.ProfileImagePath, &comment.Body, &comment.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan AniList manga comment: %w", err)
+		}
+		comments = append(comments, comment)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate AniList manga comments: %w", err)
+	}
+	return comments, nil
+}
+
+// CreateAniListMangaComment persists a comment for the authenticated user.
+// Author presentation fields are populated by the controller from the current
+// safe session user, while future list responses join the latest profile data.
+func CreateAniListMangaComment(aniListID, userID int, body string) (AniListMangaComment, error) {
+	var comment AniListMangaComment
+	err := DB.QueryRow(`
+		INSERT INTO anilist_manga_comments (anilist_id, user_id, body)
+		VALUES ($1, $2, $3)
+		RETURNING id, anilist_id, user_id,
+			TO_CHAR(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+	`, aniListID, userID, body).Scan(&comment.ID, &comment.AniListID, &comment.UserID, &comment.CreatedAt)
+	if err != nil {
+		return AniListMangaComment{}, fmt.Errorf("create AniList manga comment: %w", err)
+	}
+	comment.Body = body
+	return comment, nil
+}
+
+// DeleteAniListMangaComment deletes a comment only when it belongs to the
+// caller and the requested AniList title, preventing cross-title deletion.
+func DeleteAniListMangaComment(aniListID, userID int, commentID int64) error {
+	result, err := DB.Exec(`
+		DELETE FROM anilist_manga_comments
+		WHERE id = $1 AND anilist_id = $2 AND user_id = $3
+	`, commentID, aniListID, userID)
+	if err != nil {
+		return fmt.Errorf("delete AniList manga comment: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read AniList manga comment delete result: %w", err)
+	}
+	if deleted == 0 {
+		return ErrAniListMangaCommentDenied
+	}
+	return nil
+}
+
+// GetProfileCommentsEnabled reads the owner-controlled comment setting for a
+// profile. A missing user is reported as an error to the controller.
+func GetProfileCommentsEnabled(profileUserID int) (bool, error) {
+	var enabled bool
+	if err := DB.QueryRow(`SELECT profile_comments_enabled FROM users WHERE id = $1`, profileUserID).Scan(&enabled); err != nil {
+		return false, fmt.Errorf("load profile comment setting: %w", err)
+	}
+	return enabled, nil
+}
+
+// SetProfileCommentsEnabled changes only the authenticated owner's comment
+// setting; callers cannot alter another person's profile.
+func SetProfileCommentsEnabled(profileUserID int, enabled bool) error {
+	result, err := DB.Exec(`UPDATE users SET profile_comments_enabled = $1 WHERE id = $2`, enabled, profileUserID)
+	if err != nil {
+		return fmt.Errorf("update profile comment setting: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read profile comment setting update result: %w", err)
+	}
+	if updated == 0 {
+		return ErrProfileCommentDenied
+	}
+	return nil
+}
+
+// GetProfileComments lists newest-first comments with only the author's safe
+// public profile data.
+func GetProfileComments(profileUserID int, limit int) ([]ProfileComment, error) {
+	rows, err := DB.Query(`
+		SELECT c.id, c.profile_user_id, c.user_id,
+			COALESCE(NULLIF(u.display_name, ''), split_part(u.email, '@', 1)),
+			COALESCE(u.profile_image_path, ''), c.body,
+			TO_CHAR(c.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		FROM profile_comments c
+		INNER JOIN users u ON u.id = c.user_id
+		WHERE c.profile_user_id = $1
+		ORDER BY c.id DESC
+		LIMIT $2
+	`, profileUserID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list profile comments: %w", err)
+	}
+	defer rows.Close()
+	comments := make([]ProfileComment, 0)
+	for rows.Next() {
+		var comment ProfileComment
+		if err := rows.Scan(&comment.ID, &comment.ProfileUserID, &comment.UserID, &comment.AuthorDisplayName, &comment.ProfileImagePath, &comment.Body, &comment.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan profile comment: %w", err)
+		}
+		comments = append(comments, comment)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate profile comments: %w", err)
+	}
+	return comments, nil
+}
+
+// CreateProfileComment persists a signed-in reader's comment on a profile.
+func CreateProfileComment(profileUserID, userID int, body string) (ProfileComment, error) {
+	var comment ProfileComment
+	err := DB.QueryRow(`
+		INSERT INTO profile_comments (profile_user_id, user_id, body)
+		SELECT $1, $2, $3
+		WHERE EXISTS (SELECT 1 FROM users WHERE id = $1 AND profile_comments_enabled = TRUE)
+		RETURNING id, profile_user_id, user_id,
+			TO_CHAR(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+	`, profileUserID, userID, body).Scan(&comment.ID, &comment.ProfileUserID, &comment.UserID, &comment.CreatedAt)
+	if err == sql.ErrNoRows {
+		return ProfileComment{}, ErrProfileCommentsDisabled
+	}
+	if err != nil {
+		return ProfileComment{}, fmt.Errorf("create profile comment: %w", err)
+	}
+	comment.Body = body
+	if profileUserID != userID {
+		_ = CreateNotification(profileUserID, "profile_comment", "New profile comment", body, fmt.Sprintf("/profile/%d", profileUserID))
+	}
+	return comment, nil
+}
+
+// CreateNotification records a small, reader-owned event without blocking the
+// action that caused it if callers choose to ignore an insertion error.
+func CreateNotification(userID int, notificationType, title, body, targetPath string) error {
+	_, err := DB.Exec(`INSERT INTO user_notifications (user_id, type, title, body, target_path) VALUES ($1, $2, $3, $4, $5)`, userID, notificationType, title, body, targetPath)
+	if err != nil {
+		return fmt.Errorf("create notification: %w", err)
+	}
+	return nil
+}
+
+func GetNotifications(userID, limit int) ([]Notification, int, error) {
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	rows, err := DB.Query(`SELECT id, type, title, body, target_path, TO_CHAR(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), read_at IS NOT NULL FROM user_notifications WHERE user_id = $1 ORDER BY id DESC LIMIT $2`, userID, limit)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list notifications: %w", err)
+	}
+	defer rows.Close()
+	items := make([]Notification, 0)
+	for rows.Next() {
+		var item Notification
+		if err := rows.Scan(&item.ID, &item.Type, &item.Title, &item.Body, &item.TargetPath, &item.CreatedAt, &item.Read); err != nil {
+			return nil, 0, fmt.Errorf("scan notification: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate notifications: %w", err)
+	}
+	var unread int
+	if err := DB.QueryRow(`SELECT COUNT(*) FROM user_notifications WHERE user_id = $1 AND read_at IS NULL`, userID).Scan(&unread); err != nil {
+		return nil, 0, fmt.Errorf("count notifications: %w", err)
+	}
+	return items, unread, nil
+}
+
+func MarkNotificationRead(userID int, notificationID int64) error {
+	result, err := DB.Exec(`UPDATE user_notifications SET read_at = COALESCE(read_at, CURRENT_TIMESTAMP) WHERE id = $1 AND user_id = $2`, notificationID, userID)
+	if err != nil {
+		return fmt.Errorf("mark notification read: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read notification update: %w", err)
+	}
+	if count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func MarkAllNotificationsRead(userID int) error {
+	_, err := DB.Exec(`UPDATE user_notifications SET read_at = CURRENT_TIMESTAMP WHERE user_id = $1 AND read_at IS NULL`, userID)
+	if err != nil {
+		return fmt.Errorf("mark all notifications read: %w", err)
+	}
+	return nil
+}
+
+// DeleteProfileComment lets either the author or the profile owner remove an
+// entry while keeping deletion scoped to its target profile.
+func DeleteProfileComment(profileUserID, actingUserID int, commentID int64) error {
+	result, err := DB.Exec(`
+		DELETE FROM profile_comments
+		WHERE id = $1 AND profile_user_id = $2
+			AND (user_id = $3 OR profile_user_id = $3)
+	`, commentID, profileUserID, actingUserID)
+	if err != nil {
+		return fmt.Errorf("delete profile comment: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read profile comment delete result: %w", err)
+	}
+	if deleted == 0 {
+		return ErrProfileCommentDenied
+	}
+	return nil
 }
 
 // GetDownloadedMangaWithCovers returns all manga that have downloaded chapters and cover images

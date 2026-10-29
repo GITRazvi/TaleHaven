@@ -406,6 +406,44 @@ body.dark-mode .anilist-library-metadata-panel {
   padding-top: 1.25rem;
 }
 
+.manga-comment {
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  background: var(--bs-body-bg);
+}
+
+.manga-comment-avatar {
+  flex: 0 0 auto;
+  width: 2.5rem;
+  height: 2.5rem;
+  overflow: hidden;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--bs-body-bg);
+  background: var(--bs-primary);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.manga-comment-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.manga-comment-author {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.manga-comment-author:hover,
+.manga-comment-author:focus-visible {
+  text-decoration: underline;
+}
+
 .anilist-character-item {
   position: relative;
   display: flex;
@@ -961,6 +999,7 @@ body.dark-mode .admin-stat-value {
   background: transparent;
   font-weight: 700;
   text-align: left;
+  text-decoration: none;
 }
 
 .chat-author-name:hover,
@@ -1010,6 +1049,24 @@ body.dark-mode .admin-stat-value {
   color: #fff;
   font-weight: 700;
   overflow-wrap: anywhere;
+}
+
+.public-profile-avatar {
+  width: 8rem;
+  height: 8rem;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid var(--theme-border, #dce3ee);
+  flex: 0 0 auto;
+}
+
+.public-profile-avatar-fallback {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, var(--theme-accent, #0d6efd), #19243b);
+  color: #fff;
+  font-size: 2.5rem;
+  font-weight: 700;
 }
 
 .guided-recommendation-chat {
@@ -1169,6 +1226,21 @@ body.dark-mode .chatbot-theme .btn-link {
   -webkit-line-clamp: 2;
 }
 
+.notification-item {
+  background: rgba(13, 110, 253, 0.1);
+  color: inherit;
+  transition: background-color 0.15s ease;
+}
+
+.notification-item:not(.is-read) {
+  border-left: 0.25rem solid var(--bs-primary);
+}
+
+.notification-item:hover,
+.notification-item:focus-visible {
+  background: rgba(13, 110, 253, 0.1);
+}
+
 .chat-message-image {
   display: block;
   max-width: min(100%, 32rem);
@@ -1275,6 +1347,34 @@ body.dark-mode .chat-message + .chat-message {
   background-size: cover;
   background-position: center;
   background-attachment: fixed;
+}
+
+/* Reading should remain a neutral, distraction-free surface even when the
+   reader has selected a colorful site, profile, or image theme. */
+.site-theme-app.manga-reader-route {
+  background: #ffffff;
+}
+
+.manga-reader-page {
+  min-height: calc(100vh - 56px);
+  background: #ffffff;
+  color: #212529;
+}
+
+body.reader-page-active {
+  background: #ffffff !important;
+  background-image: none !important;
+}
+
+body.dark-mode .site-theme-app.manga-reader-route,
+body.dark-mode .manga-reader-page {
+  background: #000000;
+  color: #e0e0e0;
+}
+
+body.dark-mode.reader-page-active {
+  background: #000000 !important;
+  background-image: none !important;
 }
 
 /* Profile and open-chatroom images live on the document while active, so the
@@ -1519,6 +1619,7 @@ body.dark-mode .site-theme-app .btn-outline-primary:hover {
   .profile-display-theme.theme-has-image input,
   .profile-display-theme.theme-has-image select,
   .profile-display-theme.theme-has-image textarea,
+  .profile-display-theme.theme-has-image .manga-comment,
   .site-theme-app.theme-has-image input,
   .site-theme-app.theme-has-image select,
   .site-theme-app.theme-has-image textarea,

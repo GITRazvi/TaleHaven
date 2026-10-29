@@ -538,7 +538,7 @@ const MangaReaderPage: React.FC = () => {
           pageContainer.style.position = 'relative';
           pageContainer.style.width = '100%';
           pageContainer.style.maxWidth = '980px';
-          pageContainer.style.marginBottom = '1rem';
+          pageContainer.style.marginBottom = '0';
           pageContainer.setAttribute('data-page-index', String(pageNumber - 1));
 
           // Create loading placeholder
@@ -802,7 +802,7 @@ const MangaReaderPage: React.FC = () => {
       const pageNumber = Number.isInteger(pageIndex) ? pageIndex + 1 : index + 1;
       const shouldShow = readingMode === 'vertical' || pageNumber === activePage;
       pageElement.style.display = shouldShow ? 'block' : 'none';
-      pageElement.style.marginBottom = readingMode === 'vertical' ? '1rem' : '0';
+      pageElement.style.marginBottom = '0';
       pageElement.style.minHeight = readingMode === 'vertical' ? '0' : 'min(70vh, 900px)';
     });
   }, [activePage, loadedPagesCount, readingMode, renderedPagesCount]);
@@ -1049,7 +1049,7 @@ const MangaReaderPage: React.FC = () => {
   );
 
   return (
-    <div className="p-3">
+    <div className="p-3 manga-reader-page">
       <ReaderHeader />
 
       {saveStatus && <div className="text-muted mb-2">{saveStatus}</div>}
@@ -1060,7 +1060,7 @@ const MangaReaderPage: React.FC = () => {
         <div
           ref={containerRef}
           className="d-flex flex-column align-items-center"
-          style={{ gap: '1rem' }}
+          style={{ gap: 0 }}
           onClick={handleReaderTap}
         />
       ) : (

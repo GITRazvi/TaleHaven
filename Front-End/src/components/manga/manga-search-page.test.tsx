@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Backend from '../../app/clients/backend/backend';
@@ -10,6 +10,7 @@ jest.mock('../../app/clients/backend/backend', () => jest.fn());
 
 describe('MangaSearchPage covers', () => {
   const searchAniListManga = jest.fn();
+  const getMangaDexBrowse = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -21,7 +22,33 @@ describe('MangaSearchPage covers', () => {
         coverImage: { large: 'https://example.test/test-manga.jpg', medium: '', color: '' },
       }],
     });
-    mockedBackend.mockImplementation(() => ({ searchAniListManga, getAniListReadingSource: jest.fn() }));
+    getMangaDexBrowse.mockResolvedValue({
+      result: 'ok',
+      data: [{ id: 'mangadex-a', title: 'A MangaDex Title', description: 'A MangaDex description.', coverUrl: 'https://example.test/mangadex.jpg' }],
+      total: 92880,
+      limit: 24,
+      offset: 0,
+    });
+    mockedBackend.mockImplementation(() => ({ searchAniListManga, getAniListReadingSource: jest.fn(), getMangaDexBrowse }));
+  });
+
+  it('loads MangaDex browse results with compact direct page navigation', async () => {
+    render(<MangaSearchPage />, { wrapper: MemoryRouter });
+
+    expect(await screen.findByRole('img', { name: 'Cover for A MangaDex Title' })).toBeInTheDocument();
+    expect(getMangaDexBrowse).toHaveBeenCalledWith(24, 0);
+    expect(screen.getByRole('button', { name: 'Page 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Page 3870' })).toBeInTheDocument();
+
+    for (let step = 0; step < 5; step += 1) await userEvent.click(screen.getByRole('button', { name: 'Next page' }));
+
+    await waitFor(() => expect(getMangaDexBrowse).toHaveBeenLastCalledWith(24, 120));
+    expect(screen.getByRole('button', { name: 'Page 4' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Page 5' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Page 6' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: 'Page 7' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Page 8' })).toBeInTheDocument();
+    expect(screen.getAllByText('…')).toHaveLength(2);
   });
 
   it('renders the cover returned for a search result', async () => {

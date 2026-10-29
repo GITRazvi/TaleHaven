@@ -58,6 +58,15 @@ export type ChapterDetails = Record<string, unknown>;
 
 export type MangaSearchResponse = PagedResponse<MangaSearchItem>;
 
+export type MangaDexBrowseItem = {
+  id: string;
+  title: string;
+  description: string;
+  coverUrl: string;
+};
+
+export type MangaDexBrowseResponse = PagedResponse<MangaDexBrowseItem>;
+
 export type MangaDetailsResponse = {
   result: ApiResult;
   data: MangaDetails;
@@ -297,6 +306,32 @@ export type UserResponse = {
   user: User;
 };
 
+export type PublicProfile = {
+  id: number;
+  displayName: string;
+  profileImagePath: string;
+  createdAt: string;
+	commentsEnabled: boolean;
+};
+
+export type PublicProfileResponse = {
+  profile: PublicProfile;
+};
+
+export type ProfileComment = {
+  id: number;
+  profileUserId: number;
+  userId: number;
+  authorDisplayName: string;
+  profileImagePath: string;
+  body: string;
+  createdAt: string;
+};
+
+export type ProfileCommentsResponse = { result: ApiResult; data: ProfileComment[] };
+export type CreateProfileCommentResponse = { result: ApiResult; comment: ProfileComment };
+export type ProfileCommentsEnabledResponse = { result: ApiResult; enabled: boolean };
+
 export type AdminDashboardStats = {
   users: number;
   aniListLibrary: number;
@@ -325,8 +360,37 @@ export type ChatRoom = {
   memberCount: number;
   isMember: boolean;
   isOwner: boolean;
+	  isModerator: boolean;
+	  isMuted: boolean;
   createdAt: string;
 };
+
+export type ChatRoomMember = {
+  userId: number;
+  displayName: string;
+  profileImagePath: string;
+  isOwner: boolean;
+  isModerator: boolean;
+};
+
+export type ChatRoomMembersResponse = {
+  result: ApiResult;
+  data: ChatRoomMember[];
+};
+
+export type ChatRoomMemberDirectoryEntry = {
+  userId: number;
+  displayName: string;
+};
+
+export type ChatRoomMemberDirectoryResponse = {
+  result: ApiResult;
+  data: ChatRoomMemberDirectoryEntry[];
+};
+
+export type NotificationItem = { id: number; type: string; title: string; body: string; targetPath: string; createdAt: string; read: boolean };
+export type NotificationsResponse = { result: ApiResult; data: NotificationItem[]; unread: number };
+export type NotificationUnreadResponse = { result: ApiResult; unread: number };
 
 export type ChatMessage = {
   id: number;
@@ -539,6 +603,17 @@ export type AniListDiscoveryResponse = {
   hasNextPage: boolean;
 };
 export type AniListMangaDetailsResponse = { result: ApiResult; data: AniListManga };
+export type AniListMangaComment = {
+  id: number;
+  anilistId: number;
+  userId: number;
+  authorDisplayName: string;
+  profileImagePath: string;
+  body: string;
+  createdAt: string;
+};
+export type AniListMangaCommentsResponse = { result: ApiResult; data: AniListMangaComment[] };
+export type CreateAniListMangaCommentResponse = { result: ApiResult; comment: AniListMangaComment };
 export type AniListMangaCharactersResponse = {
   result: ApiResult;
   data: NonNullable<AniListManga["characters"]>;

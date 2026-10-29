@@ -6,7 +6,7 @@ import { AniListManga, AniListMangaSearchParams } from '../../app/clients/backen
 import { useAuth } from '../../contexts/AuthContext';
 import { parseChatbotRequest } from './chatbot-request';
 
-type ChoiceGroup = 'start' | 'genre' | 'format' | 'status';
+type ChoiceGroup = 'start' | 'genre';
 
 type RecommendationChoice = {
   label: string;
@@ -34,6 +34,7 @@ const GuidedRecommendationChat: React.FC = () => {
   const [filters, setFilters] = useState<RecommendationChoice['filters'] | null>(null);
   const [recommendations, setRecommendations] = useState<AniListManga[]>([]);
   const [savedIDs, setSavedIDs] = useState<Set<number>>(new Set());
+  const [topGenres, setTopGenres] = useState<string[]>([]);
   const [libraryReady, setLibraryReady] = useState(!user);
   const [page, setPage] = useState(0);
   const [hasNextPage, setHasNextPage] = useState(false);
@@ -41,10 +42,12 @@ const GuidedRecommendationChat: React.FC = () => {
   const [error, setError] = useState('');
   const [typedRequest, setTypedRequest] = useState('');
   const [excludedRecommendationIDs, setExcludedRecommendationIDs] = useState<Set<number>>(new Set());
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
 
   useEffect(() => {
     if (!user) {
       setSavedIDs(new Set());
+      setTopGenres([]);
       setLibraryReady(true);
       return;
     }
@@ -54,12 +57,14 @@ const GuidedRecommendationChat: React.FC = () => {
       .then((response) => {
         if (!cancelled) {
           setSavedIDs(new Set(response.data.map((item) => item.anilistId)));
+          setTopGenres(response.stats?.topGenres || []);
           setLibraryReady(true);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setSavedIDs(new Set());
+          setTopGenres([]);
           setLibraryReady(true);
         }
       });
@@ -75,7 +80,7 @@ const GuidedRecommendationChat: React.FC = () => {
     setLoading(true);
     setError('');
     try {
-      const response = await backend.searchAniListManga({ ...nextFilters, page: nextPage, perPage: 12, sort: 'SCORE_DESC' });
+      const response = await backend.searchAniListManga({ ...nextFilters, page: nextPage, perPage: 12, sort: nextFilters.sort || 'SCORE_DESC' });
       const received = response.data.filter((manga) => !savedIDs.has(manga.id) && !excludedIDs.has(manga.id));
       setRecommendations((current) => append
         ? [...current, ...received.filter((manga) => !current.some((known) => known.id === manga.id))]
@@ -107,6 +112,7 @@ const GuidedRecommendationChat: React.FC = () => {
     setError('');
     setTypedRequest('');
     setExcludedRecommendationIDs(new Set());
+    setSelectedGenres([]);
   };
 
   const resolveReferencedManga = async (title: string) => {
@@ -168,22 +174,29 @@ const GuidedRecommendationChat: React.FC = () => {
     }
   };
 
-  const choices = (): RecommendationChoice[] => {
-    if (choiceGroup === 'genre') return genres.map((genre) => ({ label: genre, answer: `${genre} sounds great. Here are highly rated picks.`, filters: { genre } }));
-    if (choiceGroup === 'format') return [
-      { label: 'One-shot', answer: 'Here are highly rated one-shots.', filters: { format: 'ONE_SHOT' } },
-      { label: 'Manga series', answer: 'Here are highly rated manga series.', filters: { format: 'MANGA' } },
-    ];
-    if (choiceGroup === 'status') return [
-      { label: 'Completed', answer: 'Here are completed manga you can finish at your own pace.', filters: { status: 'FINISHED' } },
-      { label: 'Publishing now', answer: 'Here are highly rated manga that are still publishing.', filters: { status: 'RELEASING' } },
-    ];
-    return [];
+  const toggleGenre = (genre: string) => {
+    setSelectedGenres((current) => current.includes(genre)
+      ? current.filter((selected) => selected !== genre)
+      : [...current, genre]);
+  };
+
+  const showSelectedGenres = () => {
+    if (!selectedGenres.length) return;
+    const genreNames = selectedGenres.join(' and ');
+    selectChoice({
+      label: genreNames,
+      answer: `${genreNames} sound${selectedGenres.length === 1 ? 's' : ''} great. Here are highly rated picks.`,
+      filters: { genres: selectedGenres },
+    });
   };
 
   const surprise = () => {
-    const genre = surpriseGenres[Math.floor(Math.random() * surpriseGenres.length)];
-    selectChoice({ label: 'Surprise me', answer: `Surprise! Let’s try something in ${genre}.`, filters: { genre } });
+    const preferredGenres = user && topGenres.length ? topGenres : surpriseGenres;
+    const genre = preferredGenres[Math.floor(Math.random() * preferredGenres.length)];
+    const answer = user && topGenres.length
+      ? `Surprise! Here’s a top-rated ${genre} manga based on your completed reading history.`
+      : `Surprise! Let’s try a top-rated ${genre} manga.`;
+    selectChoice({ label: 'Surprise me', answer, filters: { genre } });
   };
 
   return <Card className="guided-recommendation-chat shadow-sm mb-5" aria-label="Manga recommendation assistant">
@@ -212,14 +225,18 @@ const GuidedRecommendationChat: React.FC = () => {
       <div className="recommendation-bubble recommendation-bubble-assistant">What would you like help finding?</div>
       {!answer && choiceGroup === 'start' && <div className="recommendation-choice-row" aria-label="Recommendation questions">
         <Button size="sm" variant="outline-primary" onClick={() => setChoiceGroup('genre')} disabled={Boolean(user) && !libraryReady}>A genre</Button>
-        <Button size="sm" variant="outline-primary" onClick={() => setChoiceGroup('format')} disabled={Boolean(user) && !libraryReady}>Series type</Button>
-        <Button size="sm" variant="outline-primary" onClick={() => setChoiceGroup('status')} disabled={Boolean(user) && !libraryReady}>Publication status</Button>
+        <Button size="sm" variant="outline-primary" onClick={() => selectChoice({ label: 'Most popular', answer: 'Here are the most popular manga right now.', filters: { sort: 'POPULARITY_DESC' } })} disabled={Boolean(user) && !libraryReady}>Most popular</Button>
+        <Button size="sm" variant="outline-primary" onClick={() => selectChoice({ label: 'New releases', answer: 'Here are the newest manga releases.', filters: { sort: 'START_DATE_DESC' } })} disabled={Boolean(user) && !libraryReady}>New releases</Button>
+        <Button size="sm" variant="outline-primary" onClick={() => selectChoice({ label: 'Top rated', answer: 'Here are the highest-rated manga.', filters: { sort: 'SCORE_DESC' } })} disabled={Boolean(user) && !libraryReady}>Top rated</Button>
         <Button size="sm" variant="primary" onClick={surprise} disabled={Boolean(user) && !libraryReady}>Surprise me</Button>
       </div>}
 
-      {!answer && choiceGroup !== 'start' && <>
-        <div className="recommendation-bubble recommendation-bubble-assistant">{choiceGroup === 'genre' ? 'Which genre are you in the mood for?' : choiceGroup === 'format' ? 'Would you prefer a one-shot or a series?' : 'Would you like a completed manga or one still publishing?'}</div>
-        <div className="recommendation-choice-row">{choices().map((choice) => <Button key={choice.label} size="sm" variant="outline-primary" onClick={() => selectChoice(choice)} disabled={Boolean(user) && !libraryReady}>{choice.label}</Button>)}<Button size="sm" variant="link" onClick={() => setChoiceGroup('start')}>Back</Button></div>
+      {!answer && choiceGroup === 'genre' && <>
+        <div className="recommendation-bubble recommendation-bubble-assistant">Choose one or more genres, then I’ll find highly rated manga that include all of them.</div>
+        <div className="recommendation-choice-row" aria-label="Genre choices">
+          {genres.map((genre) => <Button key={genre} size="sm" variant={selectedGenres.includes(genre) ? 'primary' : 'outline-primary'} aria-pressed={selectedGenres.includes(genre)} onClick={() => toggleGenre(genre)} disabled={Boolean(user) && !libraryReady}>{genre}</Button>)}
+        </div>
+        <div className="recommendation-choice-row mt-2"><Button size="sm" variant="primary" onClick={showSelectedGenres} disabled={!selectedGenres.length || (Boolean(user) && !libraryReady)}>Show recommendations</Button><Button size="sm" variant="link" onClick={() => { setSelectedGenres([]); setChoiceGroup('start'); }}>Back</Button></div>
       </>}
 
       {answer && <div className="recommendation-bubble recommendation-bubble-reader">{answer}</div>}

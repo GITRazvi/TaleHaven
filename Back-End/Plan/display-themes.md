@@ -22,7 +22,7 @@ CSS or unsafe color values.
   room, with no arbitrary styles or CSS accepted.
 - Let a user upload one profile theme background and a room owner upload one
   chatroom theme background, using JPEG, PNG, WebP, or animated GIF files up
-  to 5 MB.
+  to 15 MB. Site-theme background images use the same per-image limit.
 - Permit only the authenticated user to update their profile theme and only a
   chatroom owner to update that room's theme.
 
@@ -58,6 +58,8 @@ CSS or unsafe color values.
    user-entered minute interval for timer-based rotation.
 10. Accept detected GIF files only for theme-background upload routes while
     leaving avatar, room-cover, and message-image rules unchanged.
+11. Permit up to 15 MB per theme-background image while retaining the 5 MB
+    cap for avatars, room covers, and chat-message images.
 
 ## Follow-up work
 
@@ -97,4 +99,12 @@ CSS or unsafe color values.
   site theme action, preventing a selected image from being silently omitted.
 - Profile and site-theme uploads now accept detected GIF content in addition to
   JPEG, PNG, and WebP; generated `.gif` paths are stored under the same
-  server-owned directories and retain the 5 MB limit.
+  server-owned directories.
+- Theme-background uploads for profiles, sites, and chatrooms now permit up to
+  15 MB per image. Profile photos, chatroom covers, and chat-message images
+  remain limited to 5 MB.
+- Controller tests pass, including coverage for the distinct theme and
+  non-theme limits. The required standalone database test was attempted but
+  this Windows host cannot access its forwarded PostgreSQL port at
+  `localhost:5433`; the rebuilt Docker backend connected to Postgres and
+  started successfully.

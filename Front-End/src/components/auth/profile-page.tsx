@@ -69,6 +69,11 @@ const ProfilePage: React.FC = () => {
     const [siteThemeImageInputKey, setSiteThemeImageInputKey] = useState(0);
     const [siteThemeImageRotationMode, setSiteThemeImageRotationMode] = useState<SiteThemeImageRotationMode>('static');
     const [siteThemeImageRotationMinutes, setSiteThemeImageRotationMinutes] = useState(15);
+	const [profileCommentsEnabled, setProfileCommentsEnabled] = useState(true);
+	const [profileCommentsLoading, setProfileCommentsLoading] = useState(true);
+	const [savingProfileComments, setSavingProfileComments] = useState(false);
+	const [profileCommentsError, setProfileCommentsError] = useState('');
+	const [profileCommentsSuccess, setProfileCommentsSuccess] = useState('');
 
     useEffect(() => {
         if (user) {
@@ -101,6 +106,15 @@ const ProfilePage: React.FC = () => {
             });
         return () => { isCurrent = false; };
     }, []);
+
+	useEffect(() => {
+		let isCurrent = true;
+		backend.getProfileCommentsEnabled()
+			.then((response) => { if (isCurrent) setProfileCommentsEnabled(response.enabled); })
+			.catch((err) => { if (isCurrent) setProfileCommentsError(err?.message || 'Unable to load profile comment settings.'); })
+			.finally(() => { if (isCurrent) setProfileCommentsLoading(false); });
+		return () => { isCurrent = false; };
+	}, []);
 
     if (!user) {
         return (
@@ -148,6 +162,21 @@ const ProfilePage: React.FC = () => {
             setSavingProfile(false);
         }
     };
+
+	const handleSaveProfileComments = async () => {
+		setProfileCommentsError('');
+		setProfileCommentsSuccess('');
+		try {
+			setSavingProfileComments(true);
+			const response = await backend.updateProfileCommentsEnabled(profileCommentsEnabled);
+			setProfileCommentsEnabled(response.enabled);
+			setProfileCommentsSuccess(response.enabled ? 'Profile comments are enabled.' : 'Profile comments are disabled.');
+		} catch (err: any) {
+			setProfileCommentsError(err?.message || 'Unable to save profile comment settings.');
+		} finally {
+			setSavingProfileComments(false);
+		}
+	};
 
     const handleChangePassword = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -347,6 +376,8 @@ const ProfilePage: React.FC = () => {
                 </Card.Body>
             </Card>
 
+			<Card className="mb-4 profile-settings-card shadow-sm"><Card.Body className="p-4"><h3 className="h5 mb-1">Profile comments</h3><p className="text-muted">Choose whether signed-in readers can leave comments on your public profile.</p>{profileCommentsError && <Alert variant="danger">{profileCommentsError}</Alert>}{profileCommentsSuccess && <Alert variant="success">{profileCommentsSuccess}</Alert>}<Form.Check type="switch" id="profile-comments-enabled" label="Allow comments on my profile" checked={profileCommentsEnabled} disabled={profileCommentsLoading || savingProfileComments} onChange={(event) => setProfileCommentsEnabled(event.target.checked)} /><Button className="mt-3" onClick={() => void handleSaveProfileComments()} disabled={profileCommentsLoading || savingProfileComments}>{savingProfileComments ? 'Saving…' : 'Save comment settings'}</Button></Card.Body></Card>
+
             <Card className={`mb-4 profile-settings-card profile-theme-preview profile-theme-${siteTheme}${siteThemeImageUrl ? ' theme-has-image' : ''} shadow-sm`} style={presentationThemeStyle(useCustomSiteColor ? siteCustomColor : undefined, siteThemeImageUrl)}>
                 <Card.Body className="p-4">
                     <h3 className="h5 mb-1">Site theme</h3>
@@ -372,7 +403,7 @@ const ProfilePage: React.FC = () => {
                         <div className="d-flex flex-wrap align-items-center gap-2">
                             <Form.Control key={siteThemeImageInputKey} className="theme-image-input" type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" disabled={savingSiteTheme} onChange={(event) => setSiteThemeImages(Array.from((event.target as HTMLInputElement).files || []))} />
                         </div>
-                        <Form.Text className="text-muted">JPEG, PNG, WebP, or animated GIF up to 5 MB each; keep up to 10. GIFs play as backgrounds. A 1920 × 1080 image works best. Selected images are uploaded when you save the site theme.</Form.Text>
+                        <Form.Text className="text-muted">JPEG, PNG, WebP, or animated GIF up to 15 MB each; keep up to 10. GIFs play as backgrounds. A 1920 × 1080 image works best. Selected images are uploaded when you save the site theme.</Form.Text>
                     </Form.Group>
                     <Form.Group className="mb-3" controlId="site-theme-image-rotation">
                         <Form.Label>Image rotation</Form.Label>
@@ -428,7 +459,7 @@ const ProfilePage: React.FC = () => {
                             <Button variant="outline-primary" onClick={handleUploadThemeImage} disabled={!themeImage || savingDisplayTheme}>{savingDisplayTheme ? 'Uploading…' : 'Upload image'}</Button>
                             {themeImageUrl && <Button variant="outline-secondary" onClick={handleRemoveThemeImage} disabled={savingDisplayTheme}>Remove image</Button>}
                         </div>
-                        <Form.Text className="text-muted">JPEG, PNG, WebP, or animated GIF up to 5 MB. GIFs play as backgrounds. A 1920 × 1080 image works best. Uploading replaces the current background.</Form.Text>
+                        <Form.Text className="text-muted">JPEG, PNG, WebP, or animated GIF up to 15 MB. GIFs play as backgrounds. A 1920 × 1080 image works best. Uploading replaces the current background.</Form.Text>
                     </Form.Group>
                     <div className="profile-theme-swatch mb-3" aria-label={`${displayTheme} theme preview`}>
                         <span /><span /><span />

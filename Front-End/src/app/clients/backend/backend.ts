@@ -8,6 +8,8 @@ import {
   AniListCharacterFavoritesResponse,
   AniListCharacterDetailsResponse,
   AniListMangaCharactersResponse,
+	AniListMangaCommentsResponse,
+  CreateAniListMangaCommentResponse,
   AniListMangaDetailsResponse,
   AniListMangaSearchParams,
   AniListReadingSourceResponse,
@@ -22,6 +24,10 @@ import {
   ChapterQuality,
   ChapterResponse,
   ChatMessagesResponse,
+	ChatRoomMembersResponse,
+	ChatRoomMemberDirectoryResponse,
+	NotificationsResponse,
+	NotificationUnreadResponse,
   ChatRoomResponse,
   ChatRoomsResponse,
   CreateChatInviteResponse,
@@ -36,6 +42,7 @@ import {
   MangaChaptersResponse,
   MangaCoverResponse,
   MangaDetailsResponse,
+  MangaDexBrowseResponse,
   MangaDexFavoritesResponse,
   MangaLibraryResponse,
   MangaSearchParams,
@@ -43,6 +50,10 @@ import {
   JoinChatRoomResponse,
   PopularMangaParams,
   PopularMangaResponse,
+  PublicProfileResponse,
+	ProfileCommentsResponse,
+	CreateProfileCommentResponse,
+	ProfileCommentsEnabledResponse,
   ReadingProgressAllResponse,
   ReadingProgressByChapterResponse,
   ReadingProgressByMangaResponse,
@@ -209,8 +220,37 @@ export default class Backend {
     return this.post<JoinChatRoomResponse>(`/chat/rooms/${roomId}/join`);
   }
 
+  async getChatRoomMembers(roomId: number): Promise<ChatRoomMembersResponse> {
+    return this.get<ChatRoomMembersResponse>(`/chat/rooms/${roomId}/members`);
+  }
+
+  async getChatRoomMemberDirectory(roomId: number): Promise<ChatRoomMemberDirectoryResponse> {
+    return this.get<ChatRoomMemberDirectoryResponse>(`/chat/rooms/${roomId}/member-directory`);
+  }
+
+  async getNotifications(): Promise<NotificationsResponse> { return this.get<NotificationsResponse>('/notifications'); }
+  async getNotificationUnreadCount(): Promise<NotificationUnreadResponse> { return this.get<NotificationUnreadResponse>('/notifications/unread-count'); }
+  async markNotificationRead(notificationId: number): Promise<ApiMessageResponse> { return this.patch<ApiMessageResponse>(`/notifications/${notificationId}/read`); }
+  async markAllNotificationsRead(): Promise<ApiMessageResponse> { return this.patch<ApiMessageResponse>('/notifications/read-all'); }
+
+  async addChatRoomModerator(roomId: number, userId: number): Promise<ChatRoomMembersResponse> {
+    return this.post<ChatRoomMembersResponse>(`/chat/rooms/${roomId}/moderators/${userId}`);
+  }
+
+  async removeChatRoomModerator(roomId: number, userId: number): Promise<ChatRoomMembersResponse> {
+    return this.delete<ChatRoomMembersResponse>(`/chat/rooms/${roomId}/moderators/${userId}`);
+  }
+
+  async banChatRoomMember(roomId: number, userId: number): Promise<ApiMessageResponse> {
+    return this.post<ApiMessageResponse>(`/chat/rooms/${roomId}/bans/${userId}`);
+  }
+
   async updateChatRoomVisibility(roomId: number, visibility: 'public' | 'invite_only'): Promise<ChatRoomResponse> {
     return this.patch<ChatRoomResponse>(`/chat/rooms/${roomId}/visibility`, { visibility });
+  }
+
+  async updateChatRoomNotifications(roomId: number, muted: boolean): Promise<ChatRoomResponse> {
+    return this.patch<ChatRoomResponse>(`/chat/rooms/${roomId}/notifications`, { muted });
   }
 
   async updateChatRoomTheme(roomId: number, theme: DisplayTheme, customThemeColor = ''): Promise<ChatRoomResponse> {
@@ -279,6 +319,30 @@ export default class Backend {
 
   async getProfile(): Promise<UserResponse> {
     return this.get<UserResponse>("/profile");
+  }
+
+  async getPublicProfile(userId: number): Promise<PublicProfileResponse> {
+    return this.get<PublicProfileResponse>(`/profiles/${encodeURIComponent(userId)}`);
+  }
+
+  async getProfileCommentsEnabled(): Promise<ProfileCommentsEnabledResponse> {
+    return this.get<ProfileCommentsEnabledResponse>('/profile/comments-enabled');
+  }
+
+  async updateProfileCommentsEnabled(enabled: boolean): Promise<ProfileCommentsEnabledResponse> {
+    return this.patch<ProfileCommentsEnabledResponse>('/profile/comments-enabled', { enabled });
+  }
+
+  async getProfileComments(userId: number): Promise<ProfileCommentsResponse> {
+    return this.get<ProfileCommentsResponse>(`/profiles/${encodeURIComponent(userId)}/comments`);
+  }
+
+  async createProfileComment(userId: number, body: string): Promise<CreateProfileCommentResponse> {
+    return this.post<CreateProfileCommentResponse>(`/profiles/${encodeURIComponent(userId)}/comments`, { body });
+  }
+
+  async deleteProfileComment(userId: number, commentId: number): Promise<ApiMessageResponse> {
+    return this.delete<ApiMessageResponse>(`/profiles/${encodeURIComponent(userId)}/comments/${encodeURIComponent(commentId)}`);
   }
 
   async updateProfile(data: UpdateProfileRequest): Promise<UserResponse> {
@@ -363,6 +427,10 @@ export default class Backend {
     return this.get<MangaSearchResponse>(`/manga/search${query}`);
   }
 
+  async getMangaDexBrowse(limit = 24, offset = 0): Promise<MangaDexBrowseResponse> {
+    return this.get<MangaDexBrowseResponse>(`/manga/browse${this.buildQuery({ limit, offset })}`);
+  }
+
   async getPopularManga(params: PopularMangaParams = {}): Promise<PopularMangaResponse> {
     const query = this.buildQuery({
       limit: params.limit,
@@ -421,6 +489,18 @@ export default class Backend {
 
   async getAniListMangaDetails(anilistId: number): Promise<AniListMangaDetailsResponse> {
     return this.get<AniListMangaDetailsResponse>(`/anilist/manga/details/${anilistId}`);
+  }
+
+  async getAniListMangaComments(anilistId: number): Promise<AniListMangaCommentsResponse> {
+    return this.get<AniListMangaCommentsResponse>(`/anilist/manga/${encodeURIComponent(anilistId)}/comments`);
+  }
+
+  async createAniListMangaComment(anilistId: number, body: string): Promise<CreateAniListMangaCommentResponse> {
+    return this.post<CreateAniListMangaCommentResponse>(`/anilist/manga/${encodeURIComponent(anilistId)}/comments`, { body });
+  }
+
+  async deleteAniListMangaComment(anilistId: number, commentId: number): Promise<ApiMessageResponse> {
+    return this.delete<ApiMessageResponse>(`/anilist/manga/${encodeURIComponent(anilistId)}/comments/${encodeURIComponent(commentId)}`);
   }
 
   async getAniListMangaCharacters(anilistId: number, page: number, perPage = 10): Promise<AniListMangaCharactersResponse> {

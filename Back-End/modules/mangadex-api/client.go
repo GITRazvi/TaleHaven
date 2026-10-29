@@ -143,6 +143,45 @@ func GetPopularManga(limit int, offset int, orderBy string, includedTags []strin
 	return &response, nil
 }
 
+// GetMangaAlphabetically retrieves a page of the public MangaDex catalog
+// ordered by its title field from A to Z.
+func GetMangaAlphabetically(limit int, offset int) (*MangaListResponse, error) {
+	params := url.Values{}
+	params.Add("limit", fmt.Sprintf("%d", limit))
+	params.Add("offset", fmt.Sprintf("%d", offset))
+	params.Add("includes[]", "cover_art")
+	params.Add("includes[]", "author")
+	params.Add("includes[]", "artist")
+	params.Add("contentRating[]", "safe")
+	params.Add("contentRating[]", "suggestive")
+	params.Add("contentRating[]", "erotica")
+	params.Add("order[title]", "asc")
+
+	cacheKey := fmt.Sprintf("%s:alphabetical:%s", CachePrefix, utils.HashText(params.Encode()))
+	if cachedData, err := getFromCache(cacheKey); err == nil && len(cachedData) > 0 {
+		var response MangaListResponse
+		if err := json.Unmarshal(cachedData, &response); err == nil {
+			utils.Logger.Info("MangaDex alphabetical browse cache hit", zap.Int("offset", offset))
+			return &response, nil
+		}
+	}
+
+	requestURL := fmt.Sprintf("%s/manga?%s", BaseURL, params.Encode())
+	body, err := makeRequest(requestURL)
+	if err != nil {
+		return nil, err
+	}
+
+	var response MangaListResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		utils.Logger.Error("Failed to parse MangaDex alphabetical browse response", zap.Error(err))
+		return nil, err
+	}
+
+	_ = setInCache(cacheKey, body, SearchCacheTTL)
+	return &response, nil
+}
+
 // GetMangaByID retrieves a specific manga by ID
 func GetMangaByID(mangaID string) (*MangaResponse, error) {
 	cacheKey := fmt.Sprintf("%s:manga:%s", CachePrefix, mangaID)

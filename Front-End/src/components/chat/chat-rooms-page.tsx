@@ -16,6 +16,8 @@ const ChatRoomsPage: React.FC = () => {
     const [name, setName] = useState('');
     const [visibility, setVisibility] = useState<ChatRoomVisibility>('public');
     const [showCreateForm, setShowCreateForm] = useState(false);
+    const [roomSearch, setRoomSearch] = useState('');
+    const [showSearch, setShowSearch] = useState(false);
 
     const loadRooms = useCallback(async () => {
         setLoading(true);
@@ -64,8 +66,16 @@ const ChatRoomsPage: React.FC = () => {
         }
     };
 
-    const publicRooms = rooms.filter((room) => room.visibility === 'public');
+    const toggleSearch = () => {
+        if (showSearch) setRoomSearch('');
+        setShowSearch((current) => !current);
+    };
+
+    const normalizedRoomSearch = roomSearch.trim().toLocaleLowerCase();
+    const roomMatchesSearch = (room: ChatRoom) => !normalizedRoomSearch || room.name.toLocaleLowerCase().includes(normalizedRoomSearch);
+    const publicRooms = rooms.filter((room) => room.visibility === 'public' && roomMatchesSearch(room));
     const privateRooms = rooms.filter((room) => room.visibility === 'invite_only');
+    const matchingPrivateRooms = privateRooms.filter(roomMatchesSearch);
 
     const renderRoom = (room: ChatRoom) => (
         <Col key={room.id} md={6} xl={4}>
@@ -91,7 +101,7 @@ const ChatRoomsPage: React.FC = () => {
         <Container className="py-4 py-md-5 chat-rooms-page">
             <div className="mb-4">
                 <p className="text-uppercase small text-muted fw-semibold mb-1">Community</p>
-                <div className="d-flex flex-wrap align-items-center justify-content-between gap-3"><h1 className="h2 mb-0">Chatrooms</h1><Button onClick={() => setShowCreateForm((current) => !current)} aria-expanded={showCreateForm} aria-controls="create-chatroom-panel">{showCreateForm ? 'Close creator' : 'Create chatroom'}</Button></div>
+                <div className="d-flex flex-wrap align-items-center justify-content-between gap-3"><h1 className="h2 mb-0">Chatrooms</h1><div className="d-flex flex-wrap gap-2"><Button variant="outline-primary" onClick={toggleSearch} aria-expanded={showSearch} aria-controls="chat-room-search-panel">{showSearch ? 'Close search' : 'Search'}</Button><Button onClick={() => setShowCreateForm((current) => !current)} aria-expanded={showCreateForm} aria-controls="create-chatroom-panel">{showCreateForm ? 'Close creator' : 'Create chatroom'}</Button></div></div>
                 <p className="text-muted mb-0">Join a public conversation or create a private room for people you invite. Private rooms never appear in public browsing.</p>
             </div>
 
@@ -117,12 +127,23 @@ const ChatRoomsPage: React.FC = () => {
                 </Card.Body>
             </Card>}
 
+            {showSearch && <Form.Group id="chat-room-search-panel" className="mb-4" controlId="chat-room-search">
+                <Form.Label className="visually-hidden">Search chatrooms</Form.Label>
+                <Form.Control
+                    type="search"
+                    value={roomSearch}
+                    onChange={(event) => setRoomSearch(event.target.value)}
+                    placeholder="Search public and your private chatrooms by name"
+                    aria-label="Search chatrooms by name"
+                />
+            </Form.Group>}
+
             {loading ? <div className="py-5 d-flex gap-2 align-items-center" role="status"><Spinner animation="border" size="sm" /> Loading chatrooms…</div> : <>
                 <section aria-labelledby="public-rooms-heading">
                     <div className="d-flex align-items-center justify-content-between mb-3"><h2 id="public-rooms-heading" className="h4 mb-0">Public rooms</h2><Button variant="outline-secondary" size="sm" onClick={() => void loadRooms()}>Refresh</Button></div>
-                    {publicRooms.length ? <Row className="g-3">{publicRooms.map(renderRoom)}</Row> : <p className="text-muted">There are no public rooms yet. Create the first one.</p>}
+                    {publicRooms.length ? <Row className="g-3">{publicRooms.map(renderRoom)}</Row> : <p className="text-muted">{normalizedRoomSearch ? 'No public rooms match this search.' : 'There are no public rooms yet. Create the first one.'}</p>}
                 </section>
-                {privateRooms.length > 0 && <section className="mt-5" aria-labelledby="your-private-rooms-heading"><h2 id="your-private-rooms-heading" className="h4">Your private rooms</h2><p className="text-muted small">Only rooms you created or joined are shown here.</p><Row className="g-3">{privateRooms.map(renderRoom)}</Row></section>}
+                {privateRooms.length > 0 && <section className="mt-5" aria-labelledby="your-private-rooms-heading"><h2 id="your-private-rooms-heading" className="h4">Your private rooms</h2><p className="text-muted small">Only rooms you created or joined are shown here.</p>{matchingPrivateRooms.length ? <Row className="g-3">{matchingPrivateRooms.map(renderRoom)}</Row> : <p className="text-muted">No private rooms match this search.</p>}</section>}
             </>}
         </Container>
     );
